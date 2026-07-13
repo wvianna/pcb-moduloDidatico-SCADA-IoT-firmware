@@ -10,9 +10,11 @@ Entrada analógica - 1 entrada anlógica com sinal de um potenciômetro onboard.
 
 Sensor de temperatura - sensor de temperatura DS18B20.
 
-Saídas discretas PWM - 3 usadas para movimento azimutal e elevação de servo motores de controlar a potência de aquecimento de uma resistência onboar. 
+Saídas discretas PWM - 3 usadas para movimento azimutal e elevação de servo motores de controlar a potência de aquecimento de uma resistência onboard. 
 
 É voltado para bancadas de automação, aulas de SCADA, testes de integração com IHM e experimentos com sensores e atuadores.
+
+> 🧩 **Projeto da PCB:** Este firmware foi desenvolvido para a placa de circuito impresso didática disponível em [github.com/wvianna/pcb-moduloDidatico-SCADA-IoT](https://github.com/wvianna/pcb-moduloDidatico-SCADA-IoT). A PCB integra todos os componentes de I/O, sensores e interface RS485 em um único hardware, facilitando a montagem e reprodução em sala de aula.
 
 ---
 

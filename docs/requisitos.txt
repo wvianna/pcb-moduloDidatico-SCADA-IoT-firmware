@@ -1,0 +1,117 @@
+Especificacao Tecnica: Firmware NodeMCU Multi-Protocolo (Modbus / MQTT / OPC UA)
+
+1. Introducao e Objetivos
+
+Este documento define os requisitos minimos para o firmware do NodeMCU v2 (ESP8266) com configuracao web, rede estatica e selecao de protocolo ativo.
+
+Objetivos principais:
+- Manter compatibilidade total com o comportamento Modbus TCP/RTU ja validado.
+- Incluir suporte operacional a MQTT com telemetria e comando por JSON.
+- Incluir selecao de modo OPC UA na interface de configuracao.
+- Manter comissionamento por AP e persistencia em LittleFS.
+
+2. Arquitetura de Comunicacao
+
+O firmware opera com apenas um protocolo ativo por vez, selecionado na interface web:
+- Modo Modbus: Modbus TCP (porta 502) + Modbus RTU RS485.
+- Modo MQTT: cliente MQTT com publish/subscribe JSON.
+- Modo OPC UA: configuracao de endpoint disponivel no setup web.
+
+Observacao:
+- A rede estatica (IP, mascara, gateway, DNS) e comum e obrigatoria para todos os modos.
+- O modelo interno de I/O (coils, discrete inputs, input registers e holding registers) e compartilhado entre os modos.
+
+3. Requisitos Funcionais
+
+- RF-001: O firmware deve oferecer seletor de protocolo ativo na pagina de setup (`modbus`, `mqtt`, `opcua`).
+- RF-002: O firmware deve manter validacao IPv4 para IP, mascara, gateway e DNS.
+- RF-003: O firmware deve permanecer em AP quando configuracao obrigatoria estiver invalida.
+- RF-004: O firmware deve persistir configuracao em `/config.txt` via LittleFS.
+
+Requisitos Modbus:
+- RF-010: Em modo Modbus, manter Modbus TCP e RTU sem regressao funcional.
+- RF-011: Funcoes TCP suportadas: `0x01`, `0x02`, `0x03`, `0x04`, `0x05`, `0x06`.
+- RF-012: Manter sincronizacao do modelo interno com banco RTU conforme logica atual.
+
+Requisitos MQTT:
+- RF-020: Em modo MQTT, configurar broker, porta, usuario e senha.
+- RF-021: Publicar entradas do NodeMCU em JSON no broker.
+- RF-022: Receber comando de saidas por subscriber JSON e aplicar em coils/holding registers.
+- RF-023: QoS minimo: 0.
+
+Requisitos OPC UA:
+- RF-030: A interface web deve conter campos de configuracao OPC UA PubSub (PublisherId e DataSetWriterId).
+- RF-031: Em modo OPC UA, o firmware deve publicar entradas em formato UA PubSub JSON sobre MQTT.
+- RF-032: Em modo OPC UA, o firmware deve receber comandos de saida via subscriber MQTT e aplicar no modelo interno.
+- RF-033: O endpoint de health deve informar `opcuaRuntimeSupported: true`.
+
+4. Interface Web de Configuracao
+
+Campos obrigatorios (todos os modos):
+- SSID, PSK, IP, Mascara, Gateway, DNS.
+- Protocolo ativo.
+
+Campos Modbus:
+- Device ID, Baud, Paridade, Stop Bits.
+
+Campos MQTT:
+- Broker, Porta, Usuario, Senha, Topico base.
+
+Campos OPC UA:
+- Publisher ID, DataSet Writer ID.
+
+5. Contratos de Dados MQTT
+
+Topicos padrao:
+- Publish entradas: `<topico_base>/inputs`
+- Subscribe saidas: `<topico_base>/outputs/set`
+- Status: `<topico_base>/status`
+
+JSON de entradas (publish):
+{
+  "ts_ms": 123456,
+  "ip": "192.168.100.200",
+  "discrete_inputs": [0, 1],
+  "input_registers": [512, 255]
+}
+
+JSON de saidas (subscribe):
+{
+  "coils": [1, 0, 1],
+  "holding_registers": [100, 450, 900]
+}
+
+Regras:
+- `coils`: ate 2 posicoes.
+- `holding_registers`: ate 3 posicoes, faixa 0..1023 (com limitacao no firmware).
+
+6. Requisitos de Robustez
+
+- RR-001: Entrada em modo de execucao somente apos Wi-Fi conectado.
+- RR-002: Em perda persistente de rede, retornar para FAILSAFE_AP.
+- RR-003: Loop principal deve permanecer nao bloqueante.
+- RR-004: Watchdog deve continuar ativo.
+
+7. Requisitos de Hardware e Pinagem
+
+- Manter pinagem atual documentada em `docs/mapeamentopinosmb.txt`.
+- Manter RS485 em D5/D6 com direcao em D4.
+- Manter gatilho de setup em D1 nivel baixo no boot.
+
+8. Entregaveis Minimos
+
+- E-001: Firmware compilavel no PlatformIO (`pio run`).
+- E-002: Interface web com selecao de protocolo e novos campos de configuracao.
+- E-003: Runtime Modbus preservado.
+- E-004: Runtime MQTT funcional (publish/subscribe JSON).
+- E-005: Documentacao de acesso dos protocolos em README.
+- E-006: Endpoint de health com protocolo ativo e flag de suporte OPC UA.
+
+9. Criterios de Aceite
+
+- CA-001: Modbus segue funcional como validado anteriormente.
+- CA-002: Em MQTT, entradas aparecem no broker em JSON no topico de publish.
+- CA-003: Em MQTT, comando JSON de saidas altera pinos/atuadores.
+- CA-004: Selecao de protocolo altera o modo ativo sem executar os demais em paralelo.
+- CA-005: Rede estatica permanece funcional em todos os modos.
+- CA-006: Configuracao invalida mantem AP para recuperacao.

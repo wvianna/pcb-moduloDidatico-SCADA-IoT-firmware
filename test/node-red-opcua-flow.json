@@ -1,0 +1,120 @@
+[
+  {
+    "id": "nodemcu-opcua-server",
+    "type": "tab",
+    "label": "NodeMCU OPC UA Server",
+    "disabled": false,
+    "info": ""
+  },
+  {
+    "id": "mqtt-input",
+    "type": "mqtt in",
+    "z": "nodemcu-opcua-server",
+    "name": "UA PubSub Inputs",
+    "topic": "nodemcu/opcua/inputs",
+    "qos": "0",
+    "datatype": "auto",
+    "broker": "mqtt-broker",
+    "x": 150,
+    "y": 100,
+    "wires": [["debug-raw-mqtt","parse-payload"]]
+  },
+  {
+    "id": "debug-raw-mqtt",
+    "type": "debug",
+    "z": "nodemcu-opcua-server",
+    "name": "RAW MQTT",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "x": 380,
+    "y": 60,
+    "wires": []
+  },
+  {
+    "id": "parse-payload",
+    "type": "function",
+    "z": "nodemcu-opcua-server",
+    "name": "Extrair campos do Payload",
+    "func": "var p = msg.payload;\nif (typeof p === 'string') {\n    try { p = JSON.parse(p); } catch(e) { return null; }\n}\nif (!p || !p.Payload) return null;\n\nvar pl = p.Payload;\n\nvar results = [];\n\nresults.push({ topic: 'Coil_0',        payload: Boolean(pl.Coil_0) });\nresults.push({ topic: 'Coil_1',        payload: Boolean(pl.Coil_1) });\nresults.push({ topic: 'DiscreteInput_0', payload: Boolean(pl.DiscreteInput_0) });\nresults.push({ topic: 'DiscreteInput_1', payload: Boolean(pl.DiscreteInput_1) });\nresults.push({ topic: 'ADC',           payload: Number(pl.ADC) });\nresults.push({ topic: 'DS18B20',       payload: Number(pl.DS18B20) });\nresults.push({ topic: 'PWM_Azimuth',   payload: Number(pl.PWM_Azimuth) });\nresults.push({ topic: 'PWM_Elevation', payload: Number(pl.PWM_Elevation) });\nresults.push({ topic: 'PWM_Heater',    payload: Number(pl.PWM_Heater) });\n\nreturn results;",
+    "outputs": 1,
+    "x": 380,
+    "y": 100,
+    "wires": [["opcua-server"]]
+  },
+  {
+    "id": "opcua-server",
+    "type": "opcua-server",
+    "z": "nodemcu-opcua-server",
+    "name": "Servidor OPC UA",
+    "port": "4840",
+    "endpoint": "opc.tcp://0.0.0.0:4840",
+    "security_policy": "None",
+    "nodes": [
+      {
+        "id": "ns1",
+        "name": "NodeMCU",
+        "children": [
+          {
+            "id": "ns1_coil",
+            "name": "Coils",
+            "children": [
+              { "id": "ns1_coil_0",   "name": "Coil_0",        "dataType": "Boolean", "value": false },
+              { "id": "ns1_coil_1",   "name": "Coil_1",        "dataType": "Boolean", "value": false }
+            ]
+          },
+          {
+            "id": "ns1_input",
+            "name": "DiscreteInputs",
+            "children": [
+              { "id": "ns1_di_0",     "name": "DiscreteInput_0", "dataType": "Boolean", "value": false },
+              { "id": "ns1_di_1",     "name": "DiscreteInput_1", "dataType": "Boolean", "value": false }
+            ]
+          },
+          {
+            "id": "ns1_ireg",
+            "name": "InputRegisters",
+            "children": [
+              { "id": "ns1_adc",      "name": "ADC",           "dataType": "Int16",   "value": 0 },
+              { "id": "ns1_ds18b20",  "name": "DS18B20",       "dataType": "Int16",   "value": 0 }
+            ]
+          },
+          {
+            "id": "ns1_hreg",
+            "name": "PWMs",
+            "children": [
+              { "id": "ns1_pwm_a",    "name": "PWM_Azimuth",   "dataType": "Int16",   "value": 0 },
+              { "id": "ns1_pwm_e",    "name": "PWM_Elevation", "dataType": "Int16",   "value": 0 },
+              { "id": "ns1_pwm_h",    "name": "PWM_Heater",    "dataType": "Int16",   "value": 0 }
+            ]
+          }
+        ]
+      }
+    ],
+    "x": 600,
+    "y": 100,
+    "wires": []
+  },
+  {
+    "id": "mqtt-broker",
+    "type": "mqtt-broker",
+    "name": "Broker 192.168.100.200",
+    "broker": "192.168.100.200",
+    "port": "1883",
+    "clientid": "NodeRED_OPCUA",
+    "autoConnect": true,
+    "usetls": false,
+    "protocolVersion": "4",
+    "keepalive": "60",
+    "cleansession": true,
+    "birthTopic": "",
+    "birthQos": "0",
+    "birthPayload": "",
+    "willTopic": "",
+    "willQos": "0",
+    "willPayload": ""
+  }
+]

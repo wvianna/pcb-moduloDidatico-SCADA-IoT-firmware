@@ -1,0 +1,15 @@
+{
+  "inputs_example": {
+    "ts_ms": 123456,
+    "ip": "192.168.100.200",
+    "discrete_inputs": [0, 1],
+    "input_registers": [512, 255]
+  },
+  "outputs_example": {
+    "coils": [1, 0, 1],
+    "holding_registers": [100, 450, 900]
+  },
+  "outputs_out_of_range": {
+    "holding_registers": [-10, 1200, 2048]
+  }
+}

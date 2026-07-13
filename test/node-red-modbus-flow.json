@@ -1,0 +1,260 @@
+[
+  {
+    "id": "f1a2b3c4d5e6f701",
+    "type": "tab",
+    "label": "Modbus DI Test",
+    "disabled": false,
+    "info": "Fluxo para ler entradas discretas 10001/10002 (base 0: 0/1) via TCP e RTU usando node-red-contrib-modbus 5.45.2"
+  },
+  {
+    "id": "a100000000000001",
+    "type": "inject",
+    "z": "f1a2b3c4d5e6f701",
+    "name": "TCP - poll a cada 1s",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "1",
+    "crontab": "",
+    "once": true,
+    "onceDelay": "0.5",
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 170,
+    "y": 120,
+    "wires": [
+      [
+        "a100000000000002"
+      ]
+    ]
+  },
+  {
+    "id": "a100000000000002",
+    "type": "function",
+    "z": "f1a2b3c4d5e6f701",
+    "name": "Montar requisicao DI (TCP)",
+    "func": "msg.payload = {\n    fc: 2,\n    unitid: 1,\n    address: 0,\n    quantity: 2\n};\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 410,
+    "y": 120,
+    "wires": [
+      [
+        "a100000000000003"
+      ]
+    ]
+  },
+  {
+    "id": "a100000000000003",
+    "type": "modbus-flex-getter",
+    "z": "f1a2b3c4d5e6f701",
+    "name": "Ler DI TCP",
+    "showStatusActivities": false,
+    "showErrors": true,
+    "showWarnings": true,
+    "logIOActivities": false,
+    "server": "a10000000000c001",
+    "useIOFile": false,
+    "ioFile": "",
+    "useIOForPayload": false,
+    "emptyMsgOnFail": false,
+    "keepMsgProperties": false,
+    "x": 650,
+    "y": 120,
+    "wires": [
+      [
+        "a100000000000004"
+      ],
+      [
+        "a100000000000008"
+      ]
+    ]
+  },
+  {
+    "id": "a100000000000004",
+    "type": "function",
+    "z": "f1a2b3c4d5e6f701",
+    "name": "Decodificar DI",
+    "func": "function decodeFromByteArray(data) {\n    if (!Array.isArray(data) || data.length === 0) return null;\n    const b = Number(data[0]) || 0;\n    return {\n        DI10001_base0_0: b & 0x01 ? 1 : 0,\n        DI10002_base0_1: b & 0x02 ? 1 : 0\n    };\n}\n\nlet decoded = null;\n\nif (msg.payload && Array.isArray(msg.payload.data)) {\n    decoded = decodeFromByteArray(msg.payload.data);\n}\n\nif (!decoded && msg.responseBuffer && Array.isArray(msg.responseBuffer.data)) {\n    decoded = decodeFromByteArray(msg.responseBuffer.data);\n}\n\nif (!decoded && Array.isArray(msg.payload) && msg.payload.length >= 2) {\n    decoded = {\n        DI10001_base0_0: msg.payload[0] ? 1 : 0,\n        DI10002_base0_1: msg.payload[1] ? 1 : 0\n    };\n}\n\nif (!decoded) {\n    msg.payload = {\n        erro: \"Nao foi possivel decodificar resposta\",\n        bruto: msg.payload\n    };\n    return msg;\n}\n\nmsg.payload = {\n    transporte: msg.transport || \"desconhecido\",\n    unitid: 1,\n    ...decoded\n};\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 890,
+    "y": 180,
+    "wires": [
+      [
+        "a100000000000005"
+      ]
+    ]
+  },
+  {
+    "id": "a100000000000005",
+    "type": "debug",
+    "z": "f1a2b3c4d5e6f701",
+    "name": "Resultado DI",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 1120,
+    "y": 180,
+    "wires": []
+  },
+  {
+    "id": "a100000000000006",
+    "type": "inject",
+    "z": "f1a2b3c4d5e6f701",
+    "name": "RTU - leitura manual",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0.1,
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 170,
+    "y": 280,
+    "wires": [
+      [
+        "a100000000000007"
+      ]
+    ]
+  },
+  {
+    "id": "a100000000000007",
+    "type": "function",
+    "z": "f1a2b3c4d5e6f701",
+    "name": "Montar requisicao DI (RTU)",
+    "func": "msg.transport = \"rtu\";\nmsg.payload = {\n    fc: 2,\n    unitid: 1,\n    address: 0,\n    quantity: 2\n};\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 420,
+    "y": 280,
+    "wires": [
+      [
+        "a100000000000009"
+      ]
+    ]
+  },
+  {
+    "id": "a100000000000009",
+    "type": "modbus-flex-getter",
+    "z": "f1a2b3c4d5e6f701",
+    "name": "Ler DI RTU",
+    "showStatusActivities": false,
+    "showErrors": true,
+    "showWarnings": true,
+    "logIOActivities": false,
+    "server": "a10000000000c002",
+    "useIOFile": false,
+    "ioFile": "",
+    "useIOForPayload": false,
+    "emptyMsgOnFail": false,
+    "keepMsgProperties": false,
+    "x": 650,
+    "y": 280,
+    "wires": [
+      [
+        "a100000000000004"
+      ],
+      [
+        "a100000000000008"
+      ]
+    ]
+  },
+  {
+    "id": "a100000000000008",
+    "type": "debug",
+    "z": "f1a2b3c4d5e6f701",
+    "name": "Erros Modbus",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": true,
+    "complete": "true",
+    "targetType": "full",
+    "statusVal": "payload",
+    "statusType": "auto",
+    "x": 890,
+    "y": 80,
+    "wires": []
+  },
+  {
+    "id": "a10000000000c001",
+    "type": "modbus-client",
+    "name": "NodeMCU_TCP_192.168.100.204",
+    "clienttype": "tcp",
+    "bufferCommands": true,
+    "stateLogEnabled": false,
+    "queueLogEnabled": false,
+    "failureLogEnabled": true,
+    "tcpHost": "192.168.100.204",
+    "tcpPort": "502",
+    "tcpType": "DEFAULT",
+    "serialPort": "/dev/ttyUSB0",
+    "serialType": "RTU-BUFFERD",
+    "serialBaudrate": "9600",
+    "serialDatabits": "8",
+    "serialStopbits": "1",
+    "serialParity": "none",
+    "serialConnectionDelay": "100",
+    "unit_id": "1",
+    "commandDelay": "1",
+    "clientTimeout": "1000",
+    "reconnectOnTimeout": true,
+    "reconnectTimeout": "2000",
+    "parallelUnitIdsAllowed": true,
+    "showErrors": true,
+    "showWarnings": true,
+    "showLogs": false
+  },
+  {
+    "id": "a10000000000c002",
+    "type": "modbus-client",
+    "name": "NodeMCU_RTU_ttyUSB0",
+    "clienttype": "serial",
+    "bufferCommands": true,
+    "stateLogEnabled": false,
+    "queueLogEnabled": false,
+    "failureLogEnabled": true,
+    "tcpHost": "127.0.0.1",
+    "tcpPort": "502",
+    "tcpType": "DEFAULT",
+    "serialPort": "/dev/ttyUSB0",
+    "serialType": "RTU-BUFFERD",
+    "serialBaudrate": "9600",
+    "serialDatabits": "8",
+    "serialStopbits": "1",
+    "serialParity": "none",
+    "serialConnectionDelay": "100",
+    "unit_id": "1",
+    "commandDelay": "1",
+    "clientTimeout": "1000",
+    "reconnectOnTimeout": true,
+    "reconnectTimeout": "2000",
+    "parallelUnitIdsAllowed": true,
+    "showErrors": true,
+    "showWarnings": true,
+    "showLogs": false
+  }
+]

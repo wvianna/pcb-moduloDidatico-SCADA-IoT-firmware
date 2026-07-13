@@ -17,6 +17,12 @@ Saídas discretas PWM - 3 usadas para movimento azimutal e elevação de servo m
 > 🧩 **Projeto da PCB:** Este firmware foi desenvolvido para a placa de circuito impresso didática disponível em [github.com/wvianna/pcb-moduloDidatico-SCADA-IoT](https://github.com/wvianna/pcb-moduloDidatico-SCADA-IoT). A PCB integra todos os componentes de I/O, sensores e interface RS485 em um único hardware, facilitando a montagem e reprodução em sala de aula.
 
 ---
+---
+
+**Autor:** William da Silva Vianna  
+**Software Utilizado:** VScode + PlatformIO
+
+---
 
 ## Índice
 
@@ -937,4 +943,3 @@ O script `test/test-opcua-read.py` contém a versão completa com navegação da
 
 ---
 
-> Este firmware está alinhado para bancada didática com pinagem documentada e sem conflito entre PWM de elevação e controle de direção do RS485.

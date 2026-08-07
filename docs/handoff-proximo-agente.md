@@ -49,6 +49,9 @@ O arquivo principal de firmware é `src/main.cpp`.
   - `mqttUser`
   - `mqttPass`
   - `mqttTopicBase`
+  - `mqttMode`
+  - `mqttPublishTopic`
+  - `mqttSubscribeTopic`
   - `opcUaPublisherId`
   - `opcUaDataSetWriterId`
 - Parse numérico estrito para campos numéricos no `loadConfig`.
@@ -76,15 +79,30 @@ O arquivo principal de firmware é `src/main.cpp`.
 ### MQTT
 
 - Cliente MQTT implementado com `PubSubClient`.
-- Publicação periódica de entradas em JSON:
-  - tópico: `<topico_base>/inputs`
-  - campos: `ts_ms`, `ip`, `discrete_inputs`, `input_registers`
-- Subscrição de comandos de saída em JSON:
-  - tópico: `<topico_base>/outputs/set`
-  - campos aceitos: `coils`, `holding_registers`
-- Publicação de status:
-  - tópico: `<topico_base>/status`
-  - payload: `online`
+- Configuração persistente do protocolo MQTT:
+  - `mqttMode`: `geral` ou `thingsboard` (caixa de seleção na interface web).
+  - `mqttPublishTopic`: tópico principal de publicação (usado no código para publicar as entradas).
+  - `mqttSubscribeTopic`: tópico de subscrição (comandos de saída).
+  - `mqttPort`: porta persistente do broker.
+- Modo **MQTT Geral** (tópicos configuráveis; se vazios, usam a base + `/inputs` e `/outputs/set`):
+  - Publicação periódica de entradas em JSON:
+    - tópico: `<mqttPublishTopic>` (padrão `<topico_base>/inputs`)
+    - campos: `ts_ms`, `ip`, `discrete_inputs`, `input_registers`
+  - Subscrição de comandos de saída em JSON:
+    - tópico: `<mqttSubscribeTopic>` (padrão `<topico_base>/outputs/set`)
+    - campos aceitos: `coils`, `holding_registers`
+  - Publicação de status:
+    - tópico: `<topico_base>/status`
+    - payload: `online`
+- Modo **MQTT ThingsBoard** (tópicos fixos):
+  - Publicação de telemetria:
+    - tópico: `v1/devices/me/telemetry` (fixo)
+    - campos: `ts_ms`, `ip`, `discrete_inputs`, `input_registers`
+  - Subscrição de comandos RPC:
+    - tópico: `v1/devices/me/rpc/request/+` (fixo)
+    - aceita payload direto `{ coils, holding_registers }` ou RPC `{ method, params: { coils, holding_registers } }`
+  - Autenticação: usuário = Access Token do dispositivo; **sem senha**.
+  - Status: publica `{"online":true}` em `v1/devices/me/attributes`.
 - Regras de faixa:
   - `holding_registers` limitados para `0..1023`
 - QoS operacional atual: `0`.
@@ -235,7 +253,7 @@ Manter `README.md`, `docs/requisitos.txt`, `docs/mapeamentopinosmb.txt` e `spec/
 
 - Globais: `protocol`, `ssid`, `psk`, `ip`, `mask`, `gateway`, `dns`
 - Modbus: `deviceId`, `baud`, `parity`, `stopBits`
-- MQTT: `mqttBroker`, `mqttPort`, `mqttUser`, `mqttPass`, `mqttTopicBase`
+- MQTT: `mqttMode`, `mqttBroker`, `mqttPort`, `mqttUser`, `mqttPass`, `mqttPublishTopic`, `mqttSubscribeTopic`, `mqttTopicBase` (base/fallback e OPC UA)
 - OPC UA: `opcUaPublisherId`, `opcUaDataSetWriterId`
 
 ## Comandos úteis

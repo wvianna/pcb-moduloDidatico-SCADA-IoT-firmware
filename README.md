@@ -67,8 +67,8 @@ Saídas discretas PWM - 3 usadas para movimento azimutal e elevação de servo m
     - [MQTT](#mqtt)
       - [Como conectar](#como-conectar)
       - [Tópicos usados](#tópicos-usados)
-      - [Formato JSON publicado em `<topico_base>/inputs`](#formato-json-publicado-em-topico_baseinputs)
-      - [Formato JSON aceito em `<topico_base>/outputs/set`](#formato-json-aceito-em-topico_baseoutputsset)
+      - [Formato JSON publicado em `<topico_publicacao>`](#formato-json-publicado-em-topico_publicacao)
+      - [Formato JSON aceito em `<topico_subscricao>`](#formato-json-aceito-em-topico_subscricao)
     - [OPC UA](#opc-ua)
       - [Tópicos UA usados](#tópicos-ua-usados)
       - [Formato JSON publicado (UA PubSub)](#formato-json-publicado-ua-pubsub)
@@ -376,9 +376,12 @@ Arquivo persistido: `/config.txt`
 | `stopBits` | uint8 | `modbus` | stop bits RTU (1 ou 2) |
 | `mqttBroker` | string | `mqtt` | endereço do broker |
 | `mqttPort` | uint16 | `mqtt` | porta do broker (1..65535) |
-| `mqttUser` | string | opcional em `mqtt` | usuário do broker |
-| `mqttPass` | string | opcional em `mqtt` | senha do broker |
-| `mqttTopicBase` | string | opcional em `mqtt` | prefixo dos tópicos MQTT |
+| `mqttUser` | string | `mqtt` (ThingsBoard) / opcional em `mqtt` (geral) | usuário do broker; no ThingsBoard é o Access Token |
+| `mqttPass` | string | opcional em `mqtt` | senha do broker (não usada no modo ThingsBoard) |
+| `mqttMode` | enum (`geral`,`thingsboard`) | `mqtt` | modo MQTT: geral ou ThingsBoard |
+| `mqttPublishTopic` | string | opcional em `mqtt` (geral) | tópico principal de publicação; vazio usa `<base>/inputs` |
+| `mqttSubscribeTopic` | string | opcional em `mqtt` (geral) | tópico de subscrição; vazio usa `<base>/outputs/set` |
+| `mqttTopicBase` | string | opcional em `mqtt`/`opcua` | prefixo usado pelo OPC UA e como fallback dos tópicos MQTT |
 | `opcUaPublisherId` | string | `opcua` | Publisher ID no ecossistema OPC UA PubSub |
 | `opcUaDataSetWriterId` | uint16 | `opcua` | DataSetWriter ID (1..65535) |
 
@@ -438,17 +441,29 @@ Requer protocolo `MQTT` selecionado no setup. O dispositivo se conecta ao broker
 #### Como conectar
 
 - Selecionar `MQTT` como protocolo ativo no setup web.
-- Definir broker, porta, usuário/senha (se necessário) e tópico base.
+- Escolher o modo MQTT: **Geral** ou **ThingsBoard**.
+- No modo **Geral**: definir broker, porta, usuário/senha (se necessário), tópico de publicação e tópico de subscrição.
+- No modo **ThingsBoard**: o tópico de telemetria é fixo (`v1/devices/me/telemetry`), o usuário é o Access Token do dispositivo e **não há senha**; basta definir broker, porta e token.
 
 #### Tópicos usados
 
+**Modo MQTT Geral** (tópicos configuráveis no setup; se vazios, usam `<topico_base>`):
+
 | Direção | Tópico | Descrição |
 | --- | --- | --- |
-| Publish (NodeMCU → broker) | `<topico_base>/inputs` | Entradas publicadas periodicamente |
-| Subscribe (broker → NodeMCU) | `<topico_base>/outputs/set` | Comandos de saída |
+| Publish (NodeMCU → broker) | `<topico_publicacao>` (padrão `<topico_base>/inputs`) | Entradas publicadas periodicamente |
+| Subscribe (broker → NodeMCU) | `<topico_subscricao>` (padrão `<topico_base>/outputs/set`) | Comandos de saída |
 | Publish (NodeMCU → broker) | `<topico_base>/status` | Sinaliza `online` ao conectar |
 
-#### Formato JSON publicado em `<topico_base>/inputs`
+**Modo MQTT ThingsBoard** (tópicos fixos):
+
+| Direção | Tópico | Descrição |
+| --- | --- | --- |
+| Publish (NodeMCU → broker) | `v1/devices/me/telemetry` | Telemetria/entradas publicadas periodicamente (fixo) |
+| Subscribe (broker → NodeMCU) | `v1/devices/me/rpc/request/+` | Comandos RPC de saída (fixo) |
+| Publish (NodeMCU → broker) | `v1/devices/me/attributes` | Sinaliza atributo `online` ao conectar |
+
+#### Formato JSON publicado em `<topico_publicacao>`
 
 Publicado automaticamente a cada ~1,2 segundos:
 
@@ -461,7 +476,7 @@ Publicado automaticamente a cada ~1,2 segundos:
 }
 ```
 
-#### Formato JSON aceito em `<topico_base>/outputs/set`
+#### Formato JSON aceito em `<topico_subscricao>`
 
 Publicado por um cliente MQTT para acionar saídas:
 

@@ -311,6 +311,9 @@ struct DeviceConfig {
   String mqttUser;
   String mqttPass;
   String mqttTopicBase;
+  String mqttMode;            // "geral" ou "thingsboard"
+  String mqttPublishTopic;    // topico principal de publicacao (modo geral)
+  String mqttSubscribeTopic;  // topico de subscricao (modo geral)
   String opcUaPublisherId;
   uint16_t opcUaDataSetWriterId;
 };
@@ -466,7 +469,14 @@ void sanitizeProtocolConfig(DeviceConfig &cfg) {
   cfg.dns.trim();
   cfg.mqttBroker.trim();
   cfg.mqttTopicBase.trim();
+  cfg.mqttMode.trim();
+  cfg.mqttPublishTopic.trim();
+  cfg.mqttSubscribeTopic.trim();
   cfg.opcUaPublisherId.trim();
+
+  if (cfg.mqttMode != "thingsboard") {
+    cfg.mqttMode = "geral";
+  }
 }
 
 bool parseIPv4(const String &value, IPAddress &out) {
@@ -608,6 +618,9 @@ void setDefaultConfig(DeviceConfig &cfg) {
   cfg.mqttUser = "";
   cfg.mqttPass = "";
   cfg.mqttTopicBase = "nodemcu";
+  cfg.mqttMode = "geral";
+  cfg.mqttPublishTopic = "";
+  cfg.mqttSubscribeTopic = "";
   cfg.opcUaPublisherId = "NodeMCU_" + String(ESP.getChipId(), HEX);
   cfg.opcUaDataSetWriterId = OPCUA_DATASET_WRITER_ID_DEFAULT;
 }
@@ -637,6 +650,9 @@ bool saveConfig(const DeviceConfig &cfg) {
   f.printf("mqttUser=%s\n", snapshot.mqttUser.c_str());
   f.printf("mqttPass=%s\n", snapshot.mqttPass.c_str());
   f.printf("mqttTopicBase=%s\n", snapshot.mqttTopicBase.c_str());
+  f.printf("mqttMode=%s\n", snapshot.mqttMode.c_str());
+  f.printf("mqttPublishTopic=%s\n", snapshot.mqttPublishTopic.c_str());
+  f.printf("mqttSubscribeTopic=%s\n", snapshot.mqttSubscribeTopic.c_str());
   f.printf("opcUaPublisherId=%s\n", snapshot.opcUaPublisherId.c_str());
   f.printf("opcUaDataSetWriterId=%u\n", snapshot.opcUaDataSetWriterId);
   f.close();
@@ -725,6 +741,9 @@ bool loadConfig(DeviceConfig &cfg) {
     else if (key == "mqttUser") temp.mqttUser = value;
     else if (key == "mqttPass") temp.mqttPass = value;
     else if (key == "mqttTopicBase") temp.mqttTopicBase = value;
+    else if (key == "mqttMode") temp.mqttMode = value;
+    else if (key == "mqttPublishTopic") temp.mqttPublishTopic = value;
+    else if (key == "mqttSubscribeTopic") temp.mqttSubscribeTopic = value;
     else if (key == "opcUaPublisherId") temp.opcUaPublisherId = value;
     else if (key == "opcUaDataSetWriterId") {
       uint16_t parsed = 0;
@@ -803,19 +822,51 @@ String defaultMqttBaseTopic() {
   return base;
 }
 
-void buildMqttTopics() {
+bool isThingsboardMqtt() {
+  return config.mqttMode == "thingsboard";
+}
+
+String effectiveMqttBase() {
   String base = config.mqttTopicBase;
   base.trim();
   if (base.isEmpty()) {
     base = defaultMqttBaseTopic();
   }
-
-  mqttInputsTopic = base + "/inputs";
-  mqttOutputsTopic = base + "/outputs/set";
-  mqttStatusTopic = base + "/status";
+  return base;
 }
 
-void applyMqttOutputsJson(const JsonDocument &doc) {
+String effectiveMqttPublishTopic() {
+  String topic = config.mqttPublishTopic;
+  topic.trim();
+  if (topic.isEmpty()) {
+    topic = effectiveMqttBase() + "/inputs";
+  }
+  return topic;
+}
+
+String effectiveMqttSubscribeTopic() {
+  String topic = config.mqttSubscribeTopic;
+  topic.trim();
+  if (topic.isEmpty()) {
+    topic = effectiveMqttBase() + "/outputs/set";
+  }
+  return topic;
+}
+
+void buildMqttTopics() {
+  if (isThingsboardMqtt()) {
+    mqttInputsTopic = "v1/devices/me/telemetry";
+    mqttOutputsTopic = "v1/devices/me/rpc/request/+";
+    mqttStatusTopic = "v1/devices/me/attributes";
+    return;
+  }
+
+  mqttInputsTopic = effectiveMqttPublishTopic();
+  mqttOutputsTopic = effectiveMqttSubscribeTopic();
+  mqttStatusTopic = effectiveMqttBase() + "/status";
+}
+
+void applyMqttOutputsJson(JsonVariantConst doc) {
   JsonVariantConst coilsVar = doc["coils"];
   if (!coilsVar.isNull()) {
     JsonArrayConst arr = coilsVar.as<JsonArrayConst>();
@@ -853,7 +904,13 @@ void applyMqttOutputsJson(const JsonDocument &doc) {
 }
 
 void mqttCallback(char *topic, uint8_t *payload, unsigned int length) {
-  if (String(topic) != mqttOutputsTopic) {
+  String t = String(topic);
+  if (isThingsboardMqtt()) {
+    // ThingsBoard envia comandos RPC em v1/devices/me/rpc/request/<id>
+    if (!t.startsWith("v1/devices/me/rpc/request/")) {
+      return;
+    }
+  } else if (t != mqttOutputsTopic) {
     return;
   }
 
@@ -863,7 +920,13 @@ void mqttCallback(char *topic, uint8_t *payload, unsigned int length) {
     return;
   }
 
-  applyMqttOutputsJson(doc);
+  JsonVariantConst params = doc["params"];
+  if (!params.isNull()) {
+    // ThingsBoard RPC: { "method": "...", "params": { coils, holding_registers } }
+    applyMqttOutputsJson(params);
+  } else {
+    applyMqttOutputsJson(doc);
+  }
 }
 
 bool mqttConnectIfNeeded() {
@@ -881,7 +944,10 @@ bool mqttConnectIfNeeded() {
   clientId += String(ESP.getChipId(), HEX);
 
   bool connected = false;
-  if (!config.mqttUser.isEmpty()) {
+  if (isThingsboardMqtt()) {
+    // ThingsBoard: usuario = access token do dispositivo; nao usa senha.
+    connected = mqttClient.connect(clientId.c_str(), config.mqttUser.c_str(), "");
+  } else if (!config.mqttUser.isEmpty()) {
     connected = mqttClient.connect(clientId.c_str(), config.mqttUser.c_str(), config.mqttPass.c_str());
   } else {
     connected = mqttClient.connect(clientId.c_str());
@@ -896,7 +962,11 @@ bool mqttConnectIfNeeded() {
     mqttClient.publish(opcUaStatusTopic.c_str(), "online", true);
   } else {
     mqttClient.subscribe(mqttOutputsTopic.c_str(), 0);
-    mqttClient.publish(mqttStatusTopic.c_str(), "online", true);
+    if (isThingsboardMqtt()) {
+      mqttClient.publish(mqttStatusTopic.c_str(), "{\"online\":true}", true);
+    } else {
+      mqttClient.publish(mqttStatusTopic.c_str(), "online", true);
+    }
   }
   return true;
 }
@@ -1097,9 +1167,11 @@ String htmlPage(const String &status, const String &message = "") {
   String selectedModbus = config.protocol == ActiveProtocol::MODBUS ? "selected" : "";
   String selectedMqtt = config.protocol == ActiveProtocol::MQTT ? "selected" : "";
   String selectedOpcUa = config.protocol == ActiveProtocol::OPCUA ? "selected" : "";
+  String selectedMqttGeral = config.mqttMode != "thingsboard" ? "selected" : "";
+  String selectedMqttThingsboard = isThingsboardMqtt() ? "selected" : "";
 
   String html;
-  html.reserve(11200);
+  html.reserve(12800);
   html += "<!DOCTYPE html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'>";
   html += "<meta http-equiv='Cache-Control' content='no-cache, no-store, must-revalidate'>";
   html += "<meta http-equiv='Pragma' content='no-cache'>";
@@ -1147,15 +1219,20 @@ String htmlPage(const String &status, const String &message = "") {
   html += "<label title='Velocidade de comunicacao serial em bits por segundo. Deve ser igual para todos os dispositivos no barramento RS485. 9600 e 19200 sao comuns.'>Baud <span class='tip'>?</span></label><input name='baud' type='number' value='" + String(config.baud) + "'>";
   html += "<label title='Bit de verificacao de erro na transmissao serial. N = nenhum, E = par (even), O = impar (odd). Deve ser igual em toda a rede RS485.'>Paridade <span class='tip'>?</span></label><select name='parity'><option " + checkedN + " value='N'>N</option><option " + checkedE + " value='E'>E</option><option " + checkedO + " value='O'>O</option></select>";
   html += "<label title='Bits de parada (stop bits) no final de cada byte serial. 1 e o padrao mais comum. Use 2 para maior tolerancia a ruido no barramento RS485.'>Stop Bits <span class='tip'>?</span></label><select name='stopBits'><option value='1'" + String(config.stopBits == 1 ? " selected" : "") + ">1</option><option value='2'" + String(config.stopBits == 2 ? " selected" : "") + ">2</option></select></div>";
-  html += "<div class='panel'><label title='Endereco IP ou nome do servidor MQTT (broker). Ex: 192.168.100.200 ou broker.local. E o centralizador de mensagens do sistema.'>MQTT Broker <span class='tip'>?</span></label><input name='mqttBroker' value='" + config.mqttBroker + "'>";
-  html += "<label title='Porta TCP do broker MQTT. A padrao e 1883 para conexao sem criptografia. Porta 8883 e usada com TLS.'>MQTT Porta <span class='tip'>?</span></label><input name='mqttPort' type='number' min='1' max='65535' value='" + String(config.mqttPort) + "'>";
-  html += "<label title='Nome de usuario para autenticar no broker MQTT. Deixe em branco se o broker nao exige login.'>MQTT Usuario <span class='tip'>?</span></label><input name='mqttUser' value='" + config.mqttUser + "'>";
-  html += "<label title='Senha do usuario MQTT. Necessaria apenas se o broker exige autenticacao.'>MQTT Senha <span class='tip'>?</span></label><input name='mqttPass' type='password' value='" + config.mqttPass + "'>";
-  html += "<label title='Prefixo dos topicos MQTT. Os topicos finais serao {base}/inputs, {base}/outputs/set e {base}/status. Ex: nodemcu, modulo1, ou sala_aula.'>MQTT Topico Base <span class='tip'>?</span></label><input name='mqttTopicBase' value='" + config.mqttTopicBase + "'></div>";
+  html += "<div class='panel'><label title='Escolha o modo MQTT. MQTT Geral usa um broker MQTT comum (Mosquitto, HiveMQ etc.) com topicos de publicacao e subscricao configuraveis. MQTT ThingsBoard conecta ao ThingsBoard: o topico de telemetria e fixo (v1/devices/me/telemetry), o usuario e o access token do dispositivo e nao ha senha.'>MQTT Modo <span class='tip'>?</span></label><select name='mqttMode' id='mqttMode' onchange='mqttModeChanged()'><option " + selectedMqttGeral + " value='geral'>MQTT Geral</option><option " + selectedMqttThingsboard + " value='thingsboard'>MQTT ThingsBoard</option></select>";
+  html += "<label title='Endereco IP ou nome do servidor MQTT (broker). Ex: 192.168.100.200 ou broker.local. No ThingsBoard, use o IP ou dominio do servidor ThingsBoard.'>MQTT Broker <span class='tip'>?</span></label><input name='mqttBroker' value='" + config.mqttBroker + "'>";
+  html += "<label title='Porta TCP do broker MQTT. A padrao e 1883. No ThingsBoard a porta padrao tambem e 1883 (porta 8883 e usada com TLS).'>MQTT Porta <span class='tip'>?</span></label><input name='mqttPort' type='number' min='1' max='65535' value='" + String(config.mqttPort) + "'>";
+  html += "<label title='No modo Geral e o nome de usuario do broker (deixe vazio se nao exigir login). No modo ThingsBoard preencha com o ACCESS TOKEN do dispositivo.'>MQTT Usuario <span class='tip'>?</span></label><input name='mqttUser' value='" + config.mqttUser + "'>";
+  html += "<div id='mqttGeralFields'>";
+  html += "<label title='Senha do usuario MQTT. Usada apenas no modo Geral quando o broker exige autenticacao. No modo ThingsBoard nao ha senha.'>MQTT Senha <span class='tip'>?</span></label><input name='mqttPass' type='password' value='" + config.mqttPass + "'>";
+  html += "<label title='Topico principal de publicacao do firmware (telemetria/entradas). E o topico usado no codigo para publicar as leituras. Ex: nodemcu/inputs ou sala_aula/telemetria. Se vazio, usa o prefixo configurado + /inputs.'>MQTT Topico Publicacao <span class='tip'>?</span></label><input name='mqttPublishTopic' placeholder='" + effectiveMqttPublishTopic() + "' value='" + config.mqttPublishTopic + "'>";
+  html += "<label title='Topico de subscricao onde o firmware escuta comandos de saida. Ex: nodemcu/outputs/set ou sala_aula/comandos. Se vazio, usa o prefixo configurado + /outputs/set.'>MQTT Topico Subscricao <span class='tip'>?</span></label><input name='mqttSubscribeTopic' placeholder='" + effectiveMqttSubscribeTopic() + "' value='" + config.mqttSubscribeTopic + "'></div></div>";
   html += "<div class='panel'><label title='Identificador unico do publisher OPC UA no barramento. Usado pelo assinante para filtrar mensagens de origem especifica. Ex: NodeMCU_AABBCC.'>OPC UA Publisher ID <span class='tip'>?</span></label><input name='opcUaPublisherId' value='" + config.opcUaPublisherId + "'>";
   html += "<label title='Identificador do conjunto de dados (DataSet) que este modulo publica. Numeros diferentes permitem um assinante distinguir conjuntos de dados distintos do mesmo publisher.'>OPC UA DataSet Writer ID <span class='tip'>?</span></label><input name='opcUaDataSetWriterId' type='number' min='1' max='65535' value='" + String(config.opcUaDataSetWriterId) + "'>";
+  html += "<label title='Prefixo usado pelos topicos OPC UA PubSub ({base}/opcua/inputs, {base}/opcua/outputs/set, {base}/opcua/status) e como fallback dos topicos MQTT quando estes ficam vazios. Ex: nodemcu.'>OPC UA Topico Base <span class='tip'>?</span></label><input name='mqttTopicBase' value='" + config.mqttTopicBase + "'>";
   html += "<div class='sub' style='margin-top:8px'>OPC UA PubSub via MQTT — reutiliza o mesmo broker.</div></div>";
   html += "</div><button type='submit'>Salvar e Conectar</button></form>";
+  html += "<script>function mqttModeChanged(){var m=document.getElementById('mqttMode');var g=document.getElementById('mqttGeralFields');if(m&&g){g.style.display=(m.value==='thingsboard')?'none':'block';}}mqttModeChanged();</script>";
 
   // --- Instrucoes de uso ---
   html += "<details><summary>Instrucoes de Uso</summary>";
@@ -1191,18 +1268,26 @@ String htmlPage(const String &status, const String &message = "") {
 
   // Instrucoes MQTT
   {
-    String mqttBase = config.mqttTopicBase;
-    if (mqttBase.isEmpty()) { mqttBase = "nodemcu/" + String(ESP.getChipId(), HEX); }
-    String mqttIn = mqttBase + "/inputs";
-    String mqttOut = mqttBase + "/outputs/set";
-    String mqttStat = mqttBase + "/status";
+    String mqttIn = effectiveMqttPublishTopic();
+    String mqttOut = effectiveMqttSubscribeTopic();
+    String mqttStat = effectiveMqttBase() + "/status";
+    if (isThingsboardMqtt()) {
+      mqttIn = "v1/devices/me/telemetry";
+      mqttOut = "v1/devices/me/rpc/request/+";
+      mqttStat = "v1/devices/me/attributes";
+    }
     html += "<div class='sect'>Acesso via MQTT</div>";
+    html += "<p style='margin:4px 0;font-size:.82rem;color:var(--muted)'>Modo: <span class='hl'>" + (isThingsboardMqtt() ? String("MQTT ThingsBoard") : String("MQTT Geral")) + "</span></p>";
     html += "<table><tr><th>Topico</th><th>Direcao</th><th>Formato</th></tr>";
     html += "<tr><td><span class='hl'>" + mqttIn + "</span></td><td>Publica (leitura)</td><td>JSON: { discrete_inputs: [...], input_registers: [...], ts_ms, ip }</td></tr>";
     html += "<tr><td><span class='hl'>" + mqttOut + "</span></td><td>Subscribe (escrita)</td><td>JSON: { coils: [0/1, 0/1], holding_registers: [0-1023, ...] }</td></tr>";
     html += "<tr><td><span class='hl'>" + mqttStat + "</span></td><td>Publica (status)</td><td>Payload: \"online\" (LWT / retained)</td></tr>";
     html += "</table>";
-    html += "<p style='margin:4px 0;font-size:.82rem;color:var(--muted)'>Broker: <span class='hl'>" + config.mqttBroker + ":" + String(config.mqttPort) + "</span></p>";
+    html += "<p style='margin:4px 0;font-size:.82rem;color:var(--muted)'>Broker: <span class='hl'>" + config.mqttBroker + ":" + String(config.mqttPort) + "</span>";
+    if (isThingsboardMqtt()) {
+      html += " | Usuario = Access Token (sem senha)";
+    }
+    html += "</p>";
   }
 
   // Instrucoes OPC UA PubSub
@@ -1271,6 +1356,9 @@ void handleConfigPost() {
   candidate.mqttUser = webServer.arg("mqttUser");
   candidate.mqttPass = webServer.arg("mqttPass");
   candidate.mqttTopicBase = webServer.arg("mqttTopicBase");
+  candidate.mqttMode = webServer.arg("mqttMode");
+  candidate.mqttPublishTopic = webServer.arg("mqttPublishTopic");
+  candidate.mqttSubscribeTopic = webServer.arg("mqttSubscribeTopic");
   candidate.opcUaPublisherId = webServer.arg("opcUaPublisherId");
   String opcUaDsIdArg = webServer.arg("opcUaDataSetWriterId");
   if (!opcUaDsIdArg.isEmpty()) {

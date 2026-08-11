@@ -4,13 +4,13 @@ Este firmware transforma um NodeMCU v2 (ESP8266) em um dispositivo de automaçã
 
 Saídas discretas - 2 que podem ser usadas para acionamento de uma ponte H interna ou Buzzer ou Rele.
 
-Entradas digitais - 2 tipo contato seco externo ou switch onboard da PCB. A ED1 é usada para o nodemcu entrar no modo de setup duranta a inicialização.
+Entradas digitais - 2 tipo contato seco externo ou switch onboard da PCB. A ED2 é usada para o nodemcu entrar no modo de setup duranta a inicialização.
 
 Entrada analógica - 1 entrada anlógica com sinal de um potenciômetro onboard.
 
 Sensor de temperatura - sensor de temperatura DS18B20.
 
-Saídas discretas PWM - 3 usadas para movimento azimutal e elevação de servo motores de controlar a potência de aquecimento de uma resistência onboard. 
+Saídas discretas PWM - 3 usadas para movimento azimutal e elevação de servo motores de controlar a potência de aquecimento de uma resistência onboard.
 
 É voltado para bancadas de automação, aulas de SCADA, testes de integração com IHM e experimentos com sensores e atuadores.
 
@@ -123,7 +123,7 @@ Saídas discretas PWM - 3 usadas para movimento azimutal e elevação de servo m
 
 ```mermaid
 flowchart TD
-  A[Boot do NodeMCU] --> B{D1 em nível baixo?}
+  A[Boot do NodeMCU] --> B{RX/GPIO3 em nível baixo?}
   B -->|Sim| C[Modo AP]
   B -->|Não| D[Conectar ao Wi-Fi configurado]
   C --> E[Servidor web de setup]
@@ -190,8 +190,8 @@ Para relés, motores ou cargas maiores:
 Este firmware usa alguns pinos sensíveis do ESP8266.
 
 - `GPIO0 / D3`: também participa do boot da placa
-- `GPIO15 / D8`: pino de bootstrap
-- `GPIO1 / TX` e `GPIO3 / RX`: UART nativa
+- `GPIO15 / D8`: pino de bootstrap (use como entrada discreta 10001; não use como gatilho de setup)
+- `GPIO1 / TX` e `GPIO3 / RX`: UART nativa (`RX` também é usado como gatilho de setup AP quando o debug serial está desativado)
 Isso é aceitável para uso didático, mas exige cuidado em hardware real.
 
 ### 3. Conflito de pinagem resolvido
@@ -217,7 +217,7 @@ O mesmo mapeamento de I/O vale para todos os protocolos (Modbus, MQTT e OPC UA).
 | Tipo | Base 1 | Base 0 | Função | Pino | GPIO |
 | --- | ---: | ---: | --- | --- | --- |
 | Discrete Input | 10001 | 0 | Entrada discreta 1 | D8 | GPIO15 |
-| Discrete Input | 10002 | 1 | Entrada discreta 2 | RX | GPIO3 |
+| Discrete Input | 10002 | 1 | Entrada discreta 2 | RX | GPIO3 (também gatilho de setup AP) |
 
 ### Input registers
 
@@ -278,16 +278,18 @@ Antes de usar qualquer protocolo, configure o dispositivo uma única vez via mod
 
 ### Entrando no modo AP
 
-O firmware entra em setup se `D1 / GPIO5` estiver em nível baixo durante o boot.
+O firmware entra em setup se `RX / GPIO3` (entrada discreta ED2) estiver em nível baixo durante o boot.
 
 Procedimento:
 
-1. Coloque `D1` em nível baixo.
+1. Coloque `RX / GPIO3` em nível baixo (switch onboard da PCB para GND).
 2. Ligue ou resete a placa.
 3. Solte o pino após o boot.
 4. Procure a rede Wi-Fi `NodeMCU_Setup_<ChipID>`.
 5. Conecte-se à rede.
 6. Acesse `192.168.4.1` no navegador.
+
+> **Notas:** `GPIO3` é o `RX` da UART nativa — esse gatilho **só está disponível quando o debug serial está desativado** (`SERIAL_DEBUG_ENABLED=false`, padrão). Diferente do `GPIO15`, ele **não é pino de bootstrap**: com `INPUT_PULLUP` o pino fica em nível alto por padrão, então o modo AP só é forçado quando o switch puxa para GND (0 V). Não afeta o modo de boot da placa.
 
 ### Página web de configuração
 
@@ -602,7 +604,7 @@ Solução:
 
 Verifique:
 
-- se `D1` foi realmente mantido em nível baixo durante o boot
+- se `RX / GPIO3` foi realmente mantido em nível baixo durante o boot
 - se a placa reiniciou corretamente
 
 ### A saída não acionou
@@ -633,7 +635,7 @@ sequenceDiagram
   participant R as Roteador
   participant S as SCADA
 
-  U->>N: Boot com D1 baixo
+  U->>N: Boot com RX/GPIO3 baixo
   N->>U: AP NodeMCU_Setup_<ChipID>
   U->>N: Acessa 192.168.4.1
   U->>N: Salva SSID, senha, IP e Modbus
@@ -738,6 +740,111 @@ for ciclo in range(1, 4):
     time.sleep(2)
 
 client.close()
+```
+
+#### Leitura rápida — script Python (somente leitura)
+
+Há um script pronto em `test/modbus-read.py` que lê todos os registradores do módulo
+(**somente leitura** — não altera saídas) e imprime em formato de tabela.
+
+Requer: `pip install pymodbus` (pymodbus ≥ 3.x).
+
+```bash
+# Uso: python test/modbus-read.py [HOST] [PORT] [UNIT_ID]
+python test/modbus-read.py 192.168.100.204 502 1
+```
+
+Lê:
+
+- Coils `00001..00002` (FC 0x01) — saídas binárias
+- Discrete inputs `10001..10002` (FC 0x02) — entradas binárias
+- Input registers `30001..30002` (FC 0x04) — ADC e temperatura DS18B20 (valor x10)
+- Holding registers `40001..40003` (FC 0x03) — PWM azimute/elevação/resistência
+
+Exemplo de saída (dispositivo com Modbus ativo em `192.168.100.204`):
+
+```text
+Conectando em Modbus TCP 192.168.100.204:502 (unit_id=1) ...
+Conectado!
+
+Coils (FC 0x01):
+      1 (coil 0) -> 0
+      2 (coil 1) -> 0
+
+Discrete inputs (FC 0x02):
+      1 (discrete 0) -> 0
+      2 (discrete 1) -> 1
+
+Input registers (FC 0x04):
+  30001 (input reg 0 / ADC)     -> 1023
+  30002 (input reg 1 / DS18B20) -> 316 (31.6 C)
+
+Holding registers (FC 0x03):
+      1 (holding 0) -> 0
+      2 (holding 1) -> 0
+      3 (holding 2) -> 0
+```
+
+> **Nota:** o dispositivo precisa estar com o protocolo **Modbus** selecionado no setup web.
+> Se o modo ativo for MQTT ou OPC UA, a porta 502 não responde às leituras.
+
+#### Saídas — script Python (coils e PWM)
+
+O script `test/modbus-outputs.py` testa as saídas do módulo (escrita via Modbus TCP):
+
+- **Coils** `00001..00002`: piscam **3 vezes**, cada ciclo com intervalo de **2 s** (ON 2 s → OFF 2 s).
+- **Holding registers** `40001..40003` (PWM): variam de **0 a 100 %** em passos de **25 %**
+  (0, 25, 50, 75, 100), intervalo de **2 s**, e retornam a **0 %** ao final (estado seguro).
+
+Requer: `pip install pymodbus` (pymodbus ≥ 3.x).
+
+```bash
+# Uso: python test/modbus-outputs.py [HOST] [PORT] [UNIT_ID]
+python test/modbus-outputs.py 192.168.100.204 502 1
+```
+
+Exemplo de saída:
+
+```text
+=== Teste coils (piscar 3x, intervalo 2 s) ===
+[1] ON  -> coils: [True, True]
+[1] OFF -> coils: [False, False]
+...
+=== Teste PWM (holding registers, 0 a 100%, step 25%, intervalo 2 s) ===
+  0% -> valor    0 | hregs: [0, 0, 0]
+ 25% -> valor  256 | hregs: [256, 256, 256]
+ 50% -> valor  512 | hregs: [512, 512, 512]
+ 75% -> valor  767 | hregs: [767, 767, 767]
+100% -> valor 1023 | hregs: [1023, 1023, 1023]
+Reset -> hregs: [0, 0, 0]
+```
+
+> **Atenção:** este teste **aciona as saídas físicas** (relés/atuadores nos coils e PWM nos
+> motores/resistência). O `40003` controla a **resistência de aquecimento** — o teste é curto
+> (2 s por passo) e ao final todas as saídas voltam a **0**. Confirme que a bancada está pronta.
+
+#### Monitorar entrada analógica — script Python
+
+O script `test/modbus-analog-monitor.py` lê a entrada analógica (`30001` / ADC / pino `A0`)
+a cada **2 segundos**, com timestamp, até `Ctrl+C` ou por N amostras.
+
+Requer: `pip install pymodbus` (pymodbus ≥ 3.x).
+
+```bash
+# Uso: python test/modbus-analog-monitor.py [HOST] [PORT] [UNIT_ID] [SAMPLES]
+# 10 amostras (uma a cada 2 s) -> ~20 s de monitoramento
+python test/modbus-analog-monitor.py 192.168.100.204 502 1 10
+# sem o 4º argumento, roda até Ctrl+C
+python test/modbus-analog-monitor.py
+```
+
+Exemplo de saída:
+
+```text
+[20:38:40] ADC (30001) = 1023
+[20:38:42] ADC (30001) = 1023
+[20:38:45] ADC (30001) = 8
+...
 ```
 
 ---

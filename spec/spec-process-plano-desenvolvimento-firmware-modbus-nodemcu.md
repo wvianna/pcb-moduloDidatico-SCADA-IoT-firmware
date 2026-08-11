@@ -134,7 +134,7 @@ Regras:
 
 ## 5. Acceptance Criteria
 
-- AC-001: Com D1 baixo no boot, dispositivo entra em AP com SSID `NodeMCU_Setup_<ChipID>`.
+- AC-001: Com RX/GPIO3 baixo no boot, dispositivo entra em AP com SSID `NodeMCU_Setup_<ChipID>`.
 - AC-002: Configuracao de rede invalida mantem AP.
 - AC-003: Configuracao valida persiste apos reboot.
 - AC-004: Em modo `modbus`, Modbus TCP/RTU responde conforme mapa atual.

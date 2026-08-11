@@ -185,7 +185,7 @@ Conclusão:
 ### Entradas discretas
 
 - Discrete input `10001` / base 0 `0`: `D8 / GPIO15`
-- Discrete input `10002` / base 0 `1`: `RX / GPIO3`
+- Discrete input `10002` / base 0 `1`: `RX / GPIO3` (também gatilho de setup AP — dual use)
 
 ### Sensores / input registers
 
@@ -196,7 +196,7 @@ Conclusão:
 
 - `40001`: `D7 / GPIO13`
 - `40002`: `D3 / GPIO0`
-- `40003`: `D1 / GPIO5`
+- `40003`: `D1 / GPIO5` (dedicado à resistência de aquecimento)
 
 ### RS485 MAX485
 
@@ -206,7 +206,9 @@ Conclusão:
 
 ### Gatilho de setup AP
 
-- `D1 / GPIO5` ativo em nível baixo apenas durante o boot.
+- `RX / GPIO3` (ED2) ativo em nível baixo apenas durante o boot.
+
+> **Notas:** `GPIO3` é o `RX` da UART nativa — o gatilho **só funciona com `SERIAL_DEBUG_ENABLED=false`** (RX livre). Não é pino de bootstrap: com `INPUT_PULLUP` o pino fica alto por padrão e o modo AP só é forçado quando o switch puxa para GND (0 V). `GPIO15/D8` (ED1) voltou a ser somente a entrada discreta 10001.
 
 ## Pendências e riscos conhecidos
 

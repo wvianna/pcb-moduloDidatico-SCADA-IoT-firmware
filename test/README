@@ -20,3 +20,6 @@ Arquivos de regressao adicionados:
 - `node-red-opcua-flow.json`: fluxo Node-RED para criar servidor OPC UA a partir do PubSub MQTT.
 - `node-red-opcua-reader-flow.json`: fluxo Node-RED para ler dados do servidor OPC UA via cliente.
 - `test-opcua-read.py`: script Python de diagnóstico para ler os nós do servidor OPC UA diretamente.
+- `modbus-read.py`: script Python (somente leitura) para ler coils, discrete inputs, input registers e holding registers via Modbus TCP.
+- `modbus-outputs.py`: script Python de teste de saídas — coils piscando (3x, 2 s) e PWM varrendo 0–100% em passos de 25% (2 s), com reset ao final.
+- `modbus-analog-monitor.py`: script Python que monitora a entrada analógica (ADC/30001) a cada 2 s com timestamp.

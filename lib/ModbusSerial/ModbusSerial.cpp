@@ -22,8 +22,6 @@ bool ModbusSerial::config(HardwareSerial* port, long baud, u_int format, int txP
     this->_txPin = txPin;
     (*port).begin(baud, static_cast<SerialConfig>(format));
 
-    delay(2000);
-
     if (txPin >= 0) {
         pinMode(txPin, OUTPUT);
         digitalWrite(txPin, LOW);
@@ -45,8 +43,6 @@ bool ModbusSerial::config(SoftwareSerial* port, long baud, int txPin) {
     this->_port = port;
     this->_txPin = txPin;
     (*port).begin(baud);
-
-    delay(2000);
 
     if (txPin >= 0) {
         pinMode(txPin, OUTPUT);

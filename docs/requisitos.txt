@@ -13,7 +13,7 @@ Objetivos principais:
 2. Arquitetura de Comunicacao
 
 O firmware opera com apenas um protocolo ativo por vez, selecionado na interface web:
-- Modo Modbus: Modbus TCP (porta 502) + Modbus RTU RS485.
+- Modo Modbus: Modbus TCP (porta configuravel, padrao 502) + Modbus RTU RS485.
 - Modo MQTT: cliente MQTT com publish/subscribe JSON.
 - Modo OPC UA: configuracao de endpoint disponivel no setup web.
 
@@ -32,6 +32,7 @@ Requisitos Modbus:
 - RF-010: Em modo Modbus, manter Modbus TCP e RTU sem regressao funcional.
 - RF-011: Funcoes TCP suportadas: `0x01`, `0x02`, `0x03`, `0x04`, `0x05`, `0x06`.
 - RF-012: Manter sincronizacao do modelo interno com banco RTU conforme logica atual.
+- RF-013: Em modo Modbus TCP, permitir configurar a porta do servico (padrao 502) e persisti-la em /config.txt.
 
 Requisitos MQTT:
 - RF-020: Em modo MQTT, configurar broker, porta, usuario e senha.
@@ -52,7 +53,7 @@ Campos obrigatorios (todos os modos):
 - Protocolo ativo.
 
 Campos Modbus:
-- Device ID, Baud, Paridade, Stop Bits.
+- Device ID, Porta Modbus TCP, Baud, Paridade, Stop Bits.
 
 Campos MQTT:
 - Broker, Porta, Usuario, Senha, Topico base.

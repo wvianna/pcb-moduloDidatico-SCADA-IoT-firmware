@@ -1,6 +1,6 @@
 # Firmware NodeMCU SCADA Didático
 
-Este firmware transforma um NodeMCU v2 (ESP8266) em um dispositivo de automação industrial didático, capaz de se comunicar via **Modbus**, **MQTT** ou **OPC UA** — com o protocolo escolhido pelo usuário na interface web de configuração. Ele possui o seguintes I/Os físicos:
+Este firmware transforma um NodeMCU v2 (ESP8266) em um dispositivo de automação industrial didático, capaz de se comunicar via **Modbus TCP**, **Modbus RTU***, **MQTT** ou **OPC UA** — com o protocolo escolhido pelo usuário na interface web de configuração. Ele possui o seguintes I/Os físicos:
 
 Saídas discretas - 2 que podem ser usadas para acionamento de uma ponte H interna ou Buzzer ou Rele.
 
@@ -42,11 +42,7 @@ Saídas discretas PWM - 3 usadas para movimento azimutal e elevação de servo m
     - [Input registers](#input-registers)
     - [Holding registers](#holding-registers)
     - [RS485 com MAX485](#rs485-com-max485)
-  - [5. Ligações elétricas sugeridas](#5-ligações-elétricas-sugeridas)
-    - [1. LEDs nas coils](#1-leds-nas-coils)
-    - [2. DS18B20](#2-ds18b20)
-    - [3. MAX485](#3-max485)
-  - [6. Primeiros passos — configuração inicial](#6-primeiros-passos--configuração-inicial)
+  - [5. Primeiros passos — configuração inicial](#5-primeiros-passos--configuração-inicial)
     - [Entrando no modo AP](#entrando-no-modo-ap)
     - [Página web de configuração](#página-web-de-configuração)
     - [Seleção do protocolo ativo](#seleção-do-protocolo-ativo)
@@ -57,6 +53,7 @@ Saídas discretas PWM - 3 usadas para movimento azimutal e elevação de servo m
     - [Regras de runtime](#regras-de-runtime)
     - [Modbus TCP](#modbus-tcp)
       - [Porta](#porta)
+      - [Mapa de endereçamento Modbus](#mapa-de-endereçamento-modbus)
     - [Funções implementadas](#funções-implementadas)
       - [Ferramentas sugeridas](#ferramentas-sugeridas)
     - [Modbus RTU](#modbus-rtu)
@@ -107,7 +104,7 @@ Saídas discretas PWM - 3 usadas para movimento azimutal e elevação de servo m
 
 | Capacidade | Detalhe |
 | --- | --- |
-| Protocolo de comunicação | Modbus (TCP + RTU), MQTT ou OPC UA — selecionável pela web |
+| Protocolo de comunicação | Modbus TCP, Modbus RTU, MQTT ou OPC UA — selecionável pela web (modo exclusivo) |
 | Interface de configuração | Página web via Wi-Fi, sem necessidade de recompilar |
 | Sensores | ADC (A0) e DS18B20 via 1-Wire |
 | Saídas digitais | 2 coils mapeados em GPIOs |
@@ -167,8 +164,7 @@ flowchart LR
 
 ### Cargas e indicação visual
 
-- LEDs com resistor de limitação para testes de coils
-- Ou módulos de relé / transistores apropriados para cargas reais
+- Resistência de aquecimento via pwm, buzzer, rele ou ponte H Completa, servo motores. Todas as saída possue LEDs de indicação.
 
 ## 4. Pinagem usada pelo firmware
 
@@ -211,54 +207,22 @@ O mesmo mapeamento de I/O vale para todos os protocolos (Modbus, MQTT e OPC UA).
 | DI | D6 | GPIO12 |
 | DE + RE | D4 | GPIO2 |
 
-## 5. Ligações elétricas sugeridas
-
-### 1. LEDs nas coils
-
-Para cada saída discreta em teste:
-
-- GPIO -> resistor `220R` a `1k` -> LED -> GND
-
-Exemplo:
-
-- `D0` -> resistor -> anodo LED -> catodo no GND
-
-### 2. DS18B20
-
-Ligação sugerida:
-
-- `VCC` -> `3V3`
-- `GND` -> `GND`
-- `DATA` -> `D2`
-- resistor de `4k7` entre `DATA` e `3V3`
-
-### 3. MAX485
-
-- `RO` -> `D5`
-- `DI` -> `D6`
-- `DE` e `RE` juntos -> `D4`
-- `VCC` -> conforme o módulo utilizado
-- `GND` -> `GND`
-- `A/B` -> barramento RS485
-
-## 6. Primeiros passos — configuração inicial
+## 5. Primeiros passos — configuração inicial
 
 Antes de usar qualquer protocolo, configure o dispositivo uma única vez via modo AP. Essa configuração fica salva na flash e persiste após desligamento.
 
 ### Entrando no modo AP
 
-O firmware entra em setup se `RX / GPIO3` (entrada discreta ED2) estiver em nível baixo durante o boot.
+O firmware entra em setup se `RX / GPIO3` (**entrada discreta ED2**) estiver em nível baixo durante o boot.
 
 Procedimento:
 
-1. Coloque `RX / GPIO3` em nível baixo (switch onboard da PCB para GND).
+1. Coloque `RX / GPIO3` em nível baixo (s**entrada discreta ED2**).
 2. Ligue ou resete a placa.
-3. Solte o pino após o boot.
-4. Procure a rede Wi-Fi `NodeMCU_Setup_<ChipID>`.
-5. Conecte-se à rede.
-6. Acesse `192.168.4.1` no navegador.
+3. Procure a rede Wi-Fi `NodeMCU_Setup_<ChipID>`.
+4. Conecte-se à rede.
+5. Acesse `192.168.4.1` no navegador.
 
-> **Notas:** `GPIO3` é o `RX` da UART nativa — esse gatilho **só está disponível quando o debug serial está desativado** (`SERIAL_DEBUG_ENABLED=false`, padrão). Diferente do `GPIO15`, ele **não é pino de bootstrap**: com `INPUT_PULLUP` o pino fica em nível alto por padrão, então o modo AP só é forçado quando o switch puxa para GND (0 V). Não afeta o modo de boot da placa.
 
 ### Página web de configuração
 
@@ -274,6 +238,7 @@ A página permite configurar:
 - DNS
 - protocolo ativo (`Modbus`, `MQTT`, `OPC UA`)
 - endereço Modbus
+- porta Modbus TCP
 - baud rate
 - paridade
 - stop bits
@@ -293,7 +258,8 @@ O campo **Protocolo Ativo** é obrigatório e fica em destaque no topo do formul
 
 | Opção | Quando usar |
 | --- | --- |
-| `Modbus (TCP + RTU)` | Integração com SCADA, IHM ou mestre Modbus |
+| `Modbus TCP` | Integração com SCADA, IHM ou mestre Modbus via Ethernet (porta 502 por padrão, configurável) |
+| `Modbus RTU` | Integração com SCADA/IHM via barramento RS485 |
 | `MQTT` | Integração com Node-RED, dashboards IoT ou brokers |
 | `OPC UA` | OPC UA PubSub via MQTT — integração com SCADA moderno e Node-RED |
 
@@ -309,8 +275,9 @@ Se nenhuma configuração tiver sido salva, o dispositivo usa estes valores padr
 - máscara: `255.255.255.0`
 - gateway: `192.168.100.1`
 - DNS: `8.8.8.8`
-- Protocolo ativo: `modbus`
+- Protocolo ativo: `modbustcp`
 - Modbus ID: `1`
+- Porta Modbus TCP: `502`
 - baud RTU: `9600`
 - paridade: `N`
 - stop bits: `1`
@@ -340,11 +307,12 @@ Arquivo persistido: `/config.txt`
 | `mask` | ipv4 | todos os modos | máscara de rede |
 | `gateway` | ipv4 | todos os modos | gateway |
 | `dns` | ipv4 | todos os modos | DNS |
-| `protocol` | enum (`modbus`,`mqtt`,`opcua`) | todos os modos | protocolo ativo no runtime |
-| `deviceId` | uint8 | `modbus` | endereço Modbus RTU (1..247) |
-| `baud` | uint32 | `modbus` | baud rate RTU |
-| `parity` | enum (`N`,`E`,`O`) | `modbus` | paridade RTU |
-| `stopBits` | uint8 | `modbus` | stop bits RTU (1 ou 2) |
+| `protocol` | enum (`modbustcp`,`modbusrtu`,`mqtt`,`opcua`) | todos os modos | protocolo ativo no runtime |
+| `deviceId` | uint8 | `modbustcp`,`modbusrtu` | endereço Modbus (1..247) |
+| `modbusTcpPort` | uint16 | `modbustcp` | porta TCP do serviço Modbus TCP (1..65535; padrão `502`) |
+| `baud` | uint32 | `modbusrtu` | baud rate RTU |
+| `parity` | enum (`N`,`E`,`O`) | `modbusrtu` | paridade RTU |
+| `stopBits` | uint8 | `modbusrtu` | stop bits RTU (1 ou 2) |
 | `mqttBroker` | string | `mqtt` | endereço do broker |
 | `mqttPort` | uint16 | `mqtt` | porta do broker (1..65535) |
 | `mqttUser` | string | `mqtt` (ThingsBoard) / opcional em `mqtt` (geral) | usuário do broker; no ThingsBoard é o Access Token |
@@ -370,11 +338,29 @@ Comportamento de compatibilidade:
 
 ### Modbus TCP
 
-Requer protocolo `Modbus` selecionado no setup.
+Requer protocolo `Modbus TCP` selecionado no setup.
 
 #### Porta
 
-- `502`
+- Configurável na página de setup (campo **Modbus TCP Porta**); padrão `502`.
+- O serviço escuta na porta persistida em `/config.txt` (`modbusTcpPort`).
+- Para conexões fora do padrão, use a mesma porta nos scripts/SCADA (ex.: `python test/modbus-read.py <ip> <porta> 1`).
+
+#### Mapa de endereçamento Modbus
+
+Endereçamento idêntico ao exibido no help da página web de setup:
+
+| Endereço | Tipo | Faixa | Descrição |
+| --- | --- | --- | --- |
+| 00001-00002 | Coil (FC 01/05) | 0/1 | Saídas binárias |
+| 10001-10002 | Discrete Input (FC 02) | 0/1 | Entradas binárias (somente leitura) |
+| 30001 | Input Register (FC 04) | 0-1023 | ADC |
+| 30002 | Input Register (FC 04) | 0-12500 | DS18B20 temperatura (x10, graus Celsius) |
+| 40001 | Holding Register (FC 03/06) | 0-1023 | PWM Azimute |
+| 40002 | Holding Register (FC 03/06) | 0-1023 | PWM Elevação |
+| 40003 | Holding Register (FC 03/06) | 0-1023 | PWM Resistência de aquecimento |
+
+> O mesmo mapa vale para Modbus RTU (via RS485).
 
 ### Funções implementadas
 
@@ -389,14 +375,15 @@ Requer protocolo `Modbus` selecionado no setup.
 
 - QModMaster
 - Modbus Poll
-- SCADA com driver Modbus TCP
+- Qmodbus
+- SCADA com driver Modbus TCP ou RTU
 - Scripts Python com `pymodbus`
 
 > **Nota:** após reboot, aguarde alguns segundos antes de conectar — o servidor TCP pode demorar a subir após o Wi-Fi associar.
 
 ### Modbus RTU
 
-Requer protocolo `Modbus` selecionado. O firmware mantém banco RTU sincronizado com o modelo interno via barramento RS485.
+Requer protocolo `Modbus RTU` selecionado. O firmware mantém banco RTU sincronizado com o modelo interno via barramento RS485: entradas fluem do modelo para o banco RTU e saídas fluem do banco RTU para o modelo.
 
 Parâmetros configuráveis:
 
@@ -563,11 +550,12 @@ Observação:
 
 ### A placa responde a ping mas não abre a porta 502
 
-Isso pode acontecer logo após reboot/upload.
+Isso pode acontecer logo após reboot/upload, ou se a porta configurada no setup for diferente de `502`.
 
 Solução:
 
 - aguarde alguns segundos e tente novamente
+- confirme no setup web o valor do campo **Modbus TCP Porta** (padrão `502`)
 
 ### O modo AP não apareceu
 
@@ -720,7 +708,7 @@ Requer: `pip install pymodbus` (pymodbus ≥ 3.x).
 
 ```bash
 # Uso: python test/modbus-read.py [HOST] [PORT] [UNIT_ID]
-python test/modbus-read.py 192.168.100.204 502 1
+python3 test/modbus-read.py 192.168.100.204 502 1
 ```
 
 Lê:
@@ -769,9 +757,9 @@ Requer: `pip install pymodbus` (pymodbus ≥ 3.x).
 
 ```bash
 # Uso: python test/modbus-outputs.py [HOST] [PORT] [UNIT_ID] [--coils-only]
-python test/modbus-outputs.py 192.168.100.204 502 1
+python3 test/modbus-outputs.py 192.168.100.204 502 1
 # Somente as saídas digitais (coils), sem o teste de PWM:
-python test/modbus-outputs.py 192.168.100.204 502 1 --coils-only
+python3 test/modbus-outputs.py 192.168.100.204 502 1 --coils-only
 ```
 
 Exemplo de saída:
@@ -804,9 +792,9 @@ Requer: `pip install pymodbus` (pymodbus ≥ 3.x).
 ```bash
 # Uso: python test/modbus-analog-monitor.py [HOST] [PORT] [UNIT_ID] [SAMPLES]
 # 10 amostras (uma a cada 2 s) -> ~20 s de monitoramento
-python test/modbus-analog-monitor.py 192.168.100.204 502 1 10
+python3 test/modbus-analog-monitor.py 192.168.100.204 502 1 10
 # sem o 4º argumento, roda até Ctrl+C
-python test/modbus-analog-monitor.py
+python3 test/modbus-analog-monitor.py
 ```
 
 Exemplo de saída:

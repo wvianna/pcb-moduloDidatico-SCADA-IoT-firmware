@@ -4,8 +4,8 @@
 
 Este repositório contém um firmware para NodeMCU v2 (ESP8266) com:
 
-- Seleção de protocolo ativo via setup web: `modbus`, `mqtt` ou `opcua` (modo exclusivo).
-- Modbus TCP na porta 502 e Modbus RTU via RS485 quando protocolo ativo é `modbus`.
+- Seleção de protocolo ativo via setup web: `modbustcp`, `modbusrtu`, `mqtt` ou `opcua` (modo exclusivo).
+- Modbus TCP na porta 502 por padrão — configurável no setup web e persistida (`modbusTcpPort`) — (protocolo `modbustcp`) e Modbus RTU via RS485 (protocolo `modbusrtu`).
 - Modo AP para configuração via página web.
 - Persistência de configuração em LittleFS (`/config.txt`) com escrita atômica.
 - Leitura de ADC e DS18B20.
@@ -26,7 +26,7 @@ O arquivo principal de firmware é `src/main.cpp`.
 - Modo AP com SSID no formato `NodeMCU_Setup_<ChipID>`.
 - Página web local para configuração de Wi-Fi, rede estática, protocolo e parâmetros por protocolo.
 - Retorno para AP em caso de falha persistente de conexão Wi-Fi.
-- Apenas um protocolo é executado por vez (não há execução simultânea de Modbus + MQTT + OPC UA).
+- Apenas um protocolo é executado por vez (não há execução simultânea de Modbus TCP, Modbus RTU, MQTT ou OPC UA).
 
 ### Persistência
 
@@ -41,6 +41,7 @@ O arquivo principal de firmware é `src/main.cpp`.
   - `gateway`
   - `dns`
   - `deviceId`
+  - `modbusTcpPort`
   - `baud`
   - `parity`
   - `stopBits`
@@ -71,10 +72,11 @@ O arquivo principal de firmware é `src/main.cpp`.
 ### Modbus RTU
 
 - Banco de registradores mantido pela lib local `ModbusSerial`.
-- Sincronização entre o modelo interno e o banco RTU via:
-  - `syncModelToRtu()`
-  - `syncRtuToModel()`
-- Fluxo de sincronização preservado para evitar regressão da correção anterior de coils TCP.
+- Sincronização direcional (modo RTU exclusivo):
+  - `syncModelInputsToRtu()` — entradas (`ists`/`iregs`) fluem modelo → banco RTU a cada período de sensor.
+  - `syncRtuOutputsToModel()` — saídas (`coils`/`hregs`) escritas pelo mestre fluem banco RTU → modelo a cada 25 ms.
+  - `syncModelToRtu()` — usada apenas na inicialização para popular o banco.
+- Não há mais sincronização bidirecional no runtime; cada protocolo opera de forma independente.
 
 ### MQTT
 
@@ -114,18 +116,28 @@ O arquivo principal de firmware é `src/main.cpp`.
 - Opera via OPC UA PubSub (IEC 62541-14) sobre MQTT — reutiliza broker/porta/user/pass.
 - `GET /health` expõe `opcuaRuntimeSupported` para diagnóstico.
 
-### Correção importante já aplicada
+### Refatoração de desempenho (última mudança)
 
-Foi corrigido um defeito em que escritas Modbus TCP nas coils eram sobrescritas antes de chegar aos pinos físicos.
+O firmware foi refatorado para melhorar o desempenho e a responsividade do loop:
 
-Correção aplicada:
-
-- No loop principal, quando `tcpWriteDirty == true`, o firmware agora executa `syncModelToRtu()` primeiro.
-- Apenas quando não há escrita TCP pendente é que `syncRtuToModel()` é executado.
+- **Protocolos exclusivos**: `modbus` foi desdobrado em `modbustcp` e `modbusrtu`.
+  - `modbustcp`: apenas `serviceModbusTcp()` roda; escrita vai direto ao modelo, sem sincronização.
+  - `modbusrtu`: apenas `modbusRtu.task()` roda; a sincronização é direcional (entradas → banco, saídas → modelo).
+  - `modbus` legado no arquivo de configuração é interpretado como `modbustcp` (compatibilidade).
+- **DS18B20 não bloqueante**: `setWaitForConversion(false)` + leitura por `millis()` elimina o bloqueio de ~750 ms por ciclo (antes, o loop travava durante toda a conversão).
+- **Saídas aplicadas sob demanda**: `applyOutputsIfChanged()` evita reescrever pinos (`analogWrite`/`digitalWrite`) a cada 60 ms quando nada mudou.
+- **Boot/troca de protocolo mais rápidos**: removido o `delay(2000)` da lib `ModbusSerial::config`.
+- **Configuração RTU tardia**: `configureRtu()` deixou de ser chamada no `setup()`; agora é chamada apenas ao entrar no modo `modbusrtu`, poupando tempo de inicialização nos modos TCP/MQTT/OPC UA.
+- Clock mantido em 160 MHz (máximo do ESP8266), já configurado em `platformio.ini`.
 
 Impacto:
 
-- As coils TCP passaram a refletir corretamente nos pinos físicos.
+- Loop permanece responsivo durante a conversão de temperatura (Modbus/web/MQTT atendidos sem janela de ~750 ms de travamento).
+- Menos CPU gasta em sincronização e escrita repetida de pinos.
+
+### Correção importante anterior (histórico)
+
+Foi corrigido um defeito em que escritas Modbus TCP nas coils eram sobrescritas antes de chegar aos pinos físicos. Com os modos exclusivos, esse cenário deixou de existir (TCP e RTU não compartilham mais o mesmo runtime).
 
 ## Testes já executados
 
@@ -172,7 +184,9 @@ Conclusão:
 ### Verificações recentes de qualidade
 
 - Build repetido após endurecimento de persistência: sucesso.
+- Build e upload após a refatoração de desempenho (`pio run` / `pio run -t upload`): sucesso, sem warnings.
 - Diagnósticos/linters sem erros nos arquivos atualizados (`README.md`, `test/README`, `test/mqtt-regressao-checklist.md`).
+- `README.md` atualizado com a tabela "Mapa de endereçamento Modbus", espelhando o help HTML embarcado no MCU.
 
 ## Pinagem efetiva atual do firmware
 
@@ -222,13 +236,13 @@ Então `GPIO1/TX` e `GPIO3/RX` estão liberados como I/O do projeto.
 
 Se um próximo agente precisar depurar por serial, pode ser necessário reativar debug e aceitar impacto sobre `00002` e `10002`.
 
-### 3. Porta 502 não sobe instantaneamente após reboot
+### 2. Porta Modbus TCP não sobe instantaneamente após reboot
 
-Após upload/reset, o IP pode responder a `ping` antes de a porta Modbus TCP `502` voltar a aceitar conexões.
+Após upload/reset, o IP pode responder a `ping` antes de a porta Modbus TCP configurada (padrão `502`) voltar a aceitar conexões.
 
 Em testes automáticos, aguardar o serviço subir antes de iniciar o cliente Modbus.
 
-### 4. OPC UA PubSub depende do broker MQTT
+### 3. OPC UA PubSub depende do broker MQTT
 
 - O modo `opcua` reutiliza o broker MQTT como transporte; se o broker estiver indisponível, o OPC UA PubSub também para.
 
@@ -254,7 +268,7 @@ Manter `README.md`, `docs/requisitos.txt`, `docs/mapeamentopinosmb.txt` e `spec/
 ## Chaves de configuração (resumo rápido)
 
 - Globais: `protocol`, `ssid`, `psk`, `ip`, `mask`, `gateway`, `dns`
-- Modbus: `deviceId`, `baud`, `parity`, `stopBits`
+- Modbus: `deviceId` (TCP e RTU); `modbusTcpPort` (TCP, padrão 502); `baud`, `parity`, `stopBits` (somente RTU)
 - MQTT: `mqttMode`, `mqttBroker`, `mqttPort`, `mqttUser`, `mqttPass`, `mqttPublishTopic`, `mqttSubscribeTopic`, `mqttTopicBase` (base/fallback e OPC UA)
 - OPC UA: `opcUaPublisherId`, `opcUaDataSetWriterId`
 

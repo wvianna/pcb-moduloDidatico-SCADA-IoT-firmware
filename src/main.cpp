@@ -83,9 +83,9 @@ namespace {
 // Note 70: Limitar faixa evita comportamento indefinido quando cliente escreve valores fora do esperado.
 // Note 71: Escrita de coil aceita somente 0xFF00 ou 0x0000 conforme especificacao.
 // Note 72: Qualquer outro valor na escrita de coil deve retornar erro de dado ilegal.
-// Note 73: A flag tcpWriteDirty sinaliza que houve escrita via TCP e precisa propagar ao RTU.
-// Note 74: Priorizar sync model->RTU apos escrita evita perder comando recem recebido.
-// Note 75: Essa ordem de sincronizacao corrigiu bug onde outputs nao refletiam comando TCP.
+// Note 73: Com protocolos exclusivos, Modbus TCP escreve direto no modelo; nao ha sync TCP<->RTU.
+// Note 74: No modo Modbus RTU, coils/hregs pertencem ao banco RTU (escritas do mestre).
+// Note 75: Entradas (ists/iregs) fluem modelo->RTU; saidas (coils/hregs) fluem RTU->modelo.
 // Note 76: Atualizacao de sensores em periodo separado evita sobrecarga no parser de rede.
 // Note 77: DS18B20 pode levar tempo de conversao, por isso update periodico controlado e importante.
 // Note 78: Conversao DS18B20 para x10 elimina float na interface Modbus e simplifica SCADA.
@@ -256,7 +256,8 @@ constexpr uint8_t PIN_RS485_RX = D5;       // GPIO14
 constexpr uint8_t PIN_RS485_TX = D6;       // GPIO12
 constexpr uint8_t PIN_RS485_DIR = D4;      // GPIO2
 
-constexpr uint16_t MODBUS_TCP_PORT = 502;
+// Porta padrao do servico Modbus TCP (configuravel na web e persistida em /config.txt).
+constexpr uint16_t MODBUS_TCP_PORT_DEFAULT = 502;
 constexpr uint8_t MODBUS_UNIT_ID_DEFAULT = 1;
 constexpr uint32_t WIFI_CONNECT_TIMEOUT_MS = 30000UL;
 constexpr uint32_t SENSOR_PERIOD_MS = 1200UL;
@@ -289,7 +290,8 @@ enum class DeviceState : uint8_t {
 };
 
 enum class ActiveProtocol : uint8_t {
-  MODBUS,
+  MODBUS_TCP,
+  MODBUS_RTU,
   MQTT,
   OPCUA
 };
@@ -302,6 +304,7 @@ struct DeviceConfig {
   String gateway;
   String dns;
   uint8_t deviceId;
+  uint16_t modbusTcpPort;
   uint32_t baud;
   char parity;
   uint8_t stopBits;
@@ -322,7 +325,8 @@ DeviceConfig config;
 DeviceState state = DeviceState::BOOT;
 
 ESP8266WebServer webServer(80);
-WiFiServer modbusTcpServer(MODBUS_TCP_PORT);
+// Servidor Modbus TCP alocado dinamicamente para permitir porta configuravel.
+WiFiServer *modbusTcpServer = nullptr;
 WiFiClient modbusTcpClient;
 WiFiClient mqttNetClient;
 PubSubClient mqttClient(mqttNetClient);
@@ -339,7 +343,10 @@ bool coils[COILS_COUNT] = {false, false};
 bool ists[ISTS_COUNT] = {false, false};
 uint16_t iregs[IREG_COUNT] = {0, 0};
 uint16_t hregs[HREG_COUNT] = {0, 0, 0};
-bool tcpWriteDirty = false;
+
+bool appliedCoils[COILS_COUNT] = {false, false};
+uint16_t appliedHregs[HREG_COUNT] = {0, 0, 0};
+bool outputsInitialized = false;
 
 unsigned long stateStartedAt = 0;
 unsigned long lastSensorMs = 0;
@@ -347,6 +354,8 @@ unsigned long lastIoMs = 0;
 unsigned long lastModbusSyncMs = 0;
 unsigned long lastMqttPublishMs = 0;
 unsigned long lastMqttReconnectMs = 0;
+unsigned long lastDsRequestMs = 0;
+uint16_t dsConversionWaitMs = 750;
 unsigned long apSaveAtMs = 0;
 bool pendingConnectAfterSave = false;
 
@@ -409,14 +418,16 @@ String getStateName() {
 
 const char *protocolToCString(ActiveProtocol protocol) {
   switch (protocol) {
-    case ActiveProtocol::MODBUS:
-      return "modbus";
+    case ActiveProtocol::MODBUS_TCP:
+      return "modbustcp";
+    case ActiveProtocol::MODBUS_RTU:
+      return "modbusrtu";
     case ActiveProtocol::MQTT:
       return "mqtt";
     case ActiveProtocol::OPCUA:
       return "opcua";
     default:
-      return "modbus";
+      return "modbustcp";
   }
 }
 
@@ -427,7 +438,11 @@ ActiveProtocol protocolFromString(const String &value) {
   if (value == "opcua" || value == "opc ua") {
     return ActiveProtocol::OPCUA;
   }
-  return ActiveProtocol::MODBUS;
+  if (value == "modbusrtu") {
+    return ActiveProtocol::MODBUS_RTU;
+  }
+  // "modbustcp" e o valor legado "modbus" apontam para Modbus TCP.
+  return ActiveProtocol::MODBUS_TCP;
 }
 
 bool parseUInt32Strict(const String &value, uint32_t &out) {
@@ -477,6 +492,10 @@ void sanitizeProtocolConfig(DeviceConfig &cfg) {
   if (cfg.mqttMode != "thingsboard") {
     cfg.mqttMode = "geral";
   }
+
+  if (cfg.modbusTcpPort == 0) {
+    cfg.modbusTcpPort = MODBUS_TCP_PORT_DEFAULT;
+  }
 }
 
 bool parseIPv4(const String &value, IPAddress &out) {
@@ -524,8 +543,12 @@ bool hasRequiredConfig(const DeviceConfig &cfg) {
     return false;
   }
 
-  if (cfg.protocol == ActiveProtocol::MODBUS) {
-    return cfg.deviceId >= 1 && cfg.deviceId <= 247;
+  if (cfg.protocol == ActiveProtocol::MODBUS_TCP) {
+    return cfg.deviceId >= 1 && cfg.deviceId <= 247 && cfg.modbusTcpPort > 0;
+  }
+
+  if (cfg.protocol == ActiveProtocol::MODBUS_RTU) {
+    return cfg.deviceId >= 1 && cfg.deviceId <= 247 && cfg.baud > 0;
   }
 
   if (cfg.protocol == ActiveProtocol::MQTT) {
@@ -563,7 +586,12 @@ bool validateConfig(const DeviceConfig &cfg, String &error) {
     return false;
   }
 
-  if (cfg.protocol == ActiveProtocol::MODBUS) {
+  if (cfg.protocol == ActiveProtocol::MODBUS_TCP && cfg.modbusTcpPort == 0) {
+    error = "Porta Modbus TCP invalida.";
+    return false;
+  }
+
+  if (cfg.protocol == ActiveProtocol::MODBUS_RTU) {
     if (cfg.baud == 0) {
       error = "Baud rate invalido.";
       return false;
@@ -609,10 +637,11 @@ void setDefaultConfig(DeviceConfig &cfg) {
   cfg.gateway = "192.168.100.1";
   cfg.dns = "8.8.8.8";
   cfg.deviceId = MODBUS_UNIT_ID_DEFAULT;
+  cfg.modbusTcpPort = MODBUS_TCP_PORT_DEFAULT;
   cfg.baud = 9600;
   cfg.parity = 'N';
   cfg.stopBits = 1;
-  cfg.protocol = ActiveProtocol::MODBUS;
+  cfg.protocol = ActiveProtocol::MODBUS_TCP;
   cfg.mqttBroker = "192.168.100.10";
   cfg.mqttPort = MQTT_PORT_DEFAULT;
   cfg.mqttUser = "";
@@ -641,6 +670,7 @@ bool saveConfig(const DeviceConfig &cfg) {
   f.printf("gateway=%s\n", snapshot.gateway.c_str());
   f.printf("dns=%s\n", snapshot.dns.c_str());
   f.printf("deviceId=%u\n", snapshot.deviceId);
+  f.printf("modbusTcpPort=%u\n", snapshot.modbusTcpPort);
   f.printf("baud=%lu\n", static_cast<unsigned long>(snapshot.baud));
   f.printf("parity=%c\n", snapshot.parity);
   f.printf("stopBits=%u\n", snapshot.stopBits);
@@ -710,6 +740,14 @@ bool loadConfig(DeviceConfig &cfg) {
         return false;
       }
       temp.deviceId = static_cast<uint8_t>(parsed);
+    }
+    else if (key == "modbusTcpPort") {
+      uint16_t parsed = 0;
+      if (!parseUInt16Strict(value, parsed)) {
+        f.close();
+        return false;
+      }
+      temp.modbusTcpPort = parsed;
     }
     else if (key == "baud") {
       uint32_t parsed = 0;
@@ -788,7 +826,20 @@ void configureRtu() {
   modbusRtu.config(&rs485Serial, config.baud, PIN_RS485_DIR);
 }
 
-void syncRtuToModel() {
+// Direcao entradas (modelo -> banco RTU): apenas ists e iregs.
+// Em modo RTU exclusivo, coils/hregs pertencem ao banco RTU (escritas do mestre),
+// entao nunca devem ser sobrescritos por copia modelo->banco em runtime.
+void syncModelInputsToRtu() {
+  for (uint8_t i = 0; i < ISTS_COUNT; i++) {
+    modbusRtu.Ists(i, ists[i]);
+  }
+  for (uint8_t i = 0; i < IREG_COUNT; i++) {
+    modbusRtu.Ireg(i, iregs[i]);
+  }
+}
+
+// Direcao saidas (banco RTU -> modelo): coils e hregs escritos pelo mestre RTU.
+void syncRtuOutputsToModel() {
   for (uint8_t i = 0; i < COILS_COUNT; i++) {
     coils[i] = modbusRtu.Coil(i);
   }
@@ -797,23 +848,24 @@ void syncRtuToModel() {
   }
 }
 
+// Inicializacao: popula o banco RTU com o estado atual do modelo (feito antes do
+// runtime, quando nao ha mestre escrevendo; mantido idempotente por seguranca).
 void syncModelToRtu() {
   for (uint8_t i = 0; i < COILS_COUNT; i++) {
     modbusRtu.Coil(i, coils[i]);
   }
-  for (uint8_t i = 0; i < ISTS_COUNT; i++) {
-    modbusRtu.Ists(i, ists[i]);
-  }
-  for (uint8_t i = 0; i < IREG_COUNT; i++) {
-    modbusRtu.Ireg(i, iregs[i]);
-  }
+  syncModelInputsToRtu();
   for (uint8_t i = 0; i < HREG_COUNT; i++) {
     modbusRtu.Hreg(i, hregs[i]);
   }
 }
 
-bool isModbusProtocolActive() {
-  return config.protocol == ActiveProtocol::MODBUS;
+bool isModbusTcpActive() {
+  return config.protocol == ActiveProtocol::MODBUS_TCP;
+}
+
+bool isModbusRtuActive() {
+  return config.protocol == ActiveProtocol::MODBUS_RTU;
 }
 
 String defaultMqttBaseTopic() {
@@ -896,10 +948,6 @@ void applyMqttOutputsJson(JsonVariantConst doc) {
       }
       hregs[idx++] = static_cast<uint16_t>(candidate);
     }
-  }
-
-  if (isModbusProtocolActive()) {
-    tcpWriteDirty = true;
   }
 }
 
@@ -1132,12 +1180,20 @@ bool initDs18b20Address() {
 void updateSensorRegisters() {
   iregs[0] = safeAnalogRead();
 
-  ds18b20.requestTemperatures();
-  float dsTemp = DEVICE_DISCONNECTED_C;
-  if (ds18b20AddressFound) {
-    dsTemp = ds18b20.getTempC(ds18b20Address);
+  // Leitura nao bloqueante: dispara a conversao e, quando o tempo de conversao
+  // ja foi atingido, coleta o resultado. Isso evita travar o loop por ~750 ms
+  // (resolucao 12 bits) a cada ciclo, mantendo Modbus/web/MQTT responsivos.
+  unsigned long now = millis();
+  if (now - lastDsRequestMs >= dsConversionWaitMs) {
+    float dsTemp = DEVICE_DISCONNECTED_C;
+    if (ds18b20AddressFound) {
+      dsTemp = ds18b20.getTempC(ds18b20Address);
+    }
+    iregs[1] = ds18b20ToTenthC(dsTemp);
+
+    ds18b20.requestTemperatures();  // setWaitForConversion(false): retorna imediatamente
+    lastDsRequestMs = now;
   }
-  iregs[1] = ds18b20ToTenthC(dsTemp);
 }
 
 void updateDiscreteInputs() {
@@ -1160,11 +1216,47 @@ void applyOutputs() {
   analogWrite(PIN_PWM_HEATER, hregs[2]);
 }
 
+// Aplica saidas apenas quando houve mudanca, evitando reescrever pinos
+// (analogWrite/digitalWrite) a cada periodo de IO sem necessidade.
+void applyOutputsIfChanged() {
+  bool changed = !outputsInitialized;
+  if (!changed) {
+    for (uint8_t i = 0; i < COILS_COUNT; i++) {
+      if (coils[i] != appliedCoils[i]) {
+        changed = true;
+        break;
+      }
+    }
+  }
+  if (!changed) {
+    for (uint8_t i = 0; i < HREG_COUNT; i++) {
+      if (hregs[i] != appliedHregs[i]) {
+        changed = true;
+        break;
+      }
+    }
+  }
+  if (!changed) {
+    return;
+  }
+
+  applyOutputs();
+
+  for (uint8_t i = 0; i < COILS_COUNT; i++) {
+    appliedCoils[i] = coils[i];
+  }
+  for (uint8_t i = 0; i < HREG_COUNT; i++) {
+    appliedHregs[i] = hregs[i];
+  }
+  outputsInitialized = true;
+}
+
 String htmlPage(const String &status, const String &message = "") {
   String checkedN = config.parity == 'N' ? "selected" : "";
   String checkedE = config.parity == 'E' ? "selected" : "";
   String checkedO = config.parity == 'O' ? "selected" : "";
-  String selectedModbus = config.protocol == ActiveProtocol::MODBUS ? "selected" : "";
+  String selectedModbusTcp = config.protocol == ActiveProtocol::MODBUS_TCP ? "selected" : "";
+  String selectedModbusRtu = config.protocol == ActiveProtocol::MODBUS_RTU ? "selected" : "";
   String selectedMqtt = config.protocol == ActiveProtocol::MQTT ? "selected" : "";
   String selectedOpcUa = config.protocol == ActiveProtocol::OPCUA ? "selected" : "";
   String selectedMqttGeral = config.mqttMode != "thingsboard" ? "selected" : "";
@@ -1208,7 +1300,7 @@ String htmlPage(const String &status, const String &message = "") {
     html += "<div class='status'>" + message + "</div>";
   }
   html += "<form method='POST' action='/config'><div class='grid'>";
-  html += "<div class='panel'><label title='Escolha o protocolo de comunicacao que o modulo usara para trocar dados com o SCADA. Modbus e classico industrial, MQTT e leve para IoT, OPC UA PubSub e o padrao moderno da Industria 4.0.'>Protocolo Ativo <span class='tip'>?</span></label><select name='protocol' required><option " + selectedModbus + " value='modbus'>Modbus (TCP + RTU)</option><option " + selectedMqtt + " value='mqtt'>MQTT</option><option " + selectedOpcUa + " value='opcua'>OPC UA</option></select></div>";
+  html += "<div class='panel'><label title='Escolha o protocolo de comunicacao que o modulo usara para trocar dados com o SCADA. Modbus TCP usa Ethernet (porta 502 por padrao, configuravel), Modbus RTU usa RS485, MQTT e leve para IoT, OPC UA PubSub e o padrao moderno da Industria 4.0.'>Protocolo Ativo <span class='tip'>?</span></label><select name='protocol' required><option " + selectedModbusTcp + " value='modbustcp'>Modbus TCP</option><option " + selectedModbusRtu + " value='modbusrtu'>Modbus RTU</option><option " + selectedMqtt + " value='mqtt'>MQTT</option><option " + selectedOpcUa + " value='opcua'>OPC UA</option></select></div>";
   html += "<div class='panel'><label title='Nome da rede Wi-Fi (2.4 GHz) que o modulo deve conectar. Exatamente como aparece no roteador, respeitando maiusculas e minusculas.'>SSID <span class='tip'>?</span></label><input name='ssid' required value='" + config.ssid + "'>";
   html += "<label title='Senha da rede Wi-Fi. Minimo 8 caracteres. Fica salva no arquivo de configuracao do modulo.'>PSK <span class='tip'>?</span></label><input name='psk' required type='password' value='" + config.psk + "'></div>";
   html += "<div class='panel'><label title='Endereco IP fixo do modulo na rede. Deve ser unico na rede e pertencer a mesma faixa do roteador. Ex: 192.168.100.50'>IP Fixo <span class='tip'>?</span></label><input name='ip' required value='" + config.ip + "'>";
@@ -1216,6 +1308,7 @@ String htmlPage(const String &status, const String &message = "") {
   html += "<label title='Endereco IP do roteador (gateway padrao). E por ele que o modulo acessa a internet e outros dispositivos.'>Gateway <span class='tip'>?</span></label><input name='gateway' required value='" + config.gateway + "'>";
   html += "<label title='Servidor DNS para resolver nomes como \"broker.local\". Pode ser o IP do roteador (geralmente igual ao gateway).'>DNS <span class='tip'>?</span></label><input name='dns' required value='" + config.dns + "'></div>";
   html += "<div class='panel'><label title='Identificador unico do modulo no barramento Modbus (1 a 247). Cada dispositivo na rede Modbus precisa de um ID diferente.'>Modbus ID <span class='tip'>?</span></label><input name='deviceId' type='number' min='1' max='247' value='" + String(config.deviceId) + "'>";
+  html += "<label title='Porta TCP do servico Modbus TCP. A padrao e 502. Alterne apenas se o SCADA/IHM exigir outra porta.'>Modbus TCP Porta <span class='tip'>?</span></label><input name='modbusTcpPort' type='number' min='1' max='65535' value='" + String(config.modbusTcpPort) + "'>";
   html += "<label title='Velocidade de comunicacao serial em bits por segundo. Deve ser igual para todos os dispositivos no barramento RS485. 9600 e 19200 sao comuns.'>Baud <span class='tip'>?</span></label><input name='baud' type='number' value='" + String(config.baud) + "'>";
   html += "<label title='Bit de verificacao de erro na transmissao serial. N = nenhum, E = par (even), O = impar (odd). Deve ser igual em toda a rede RS485.'>Paridade <span class='tip'>?</span></label><select name='parity'><option " + checkedN + " value='N'>N</option><option " + checkedE + " value='E'>E</option><option " + checkedO + " value='O'>O</option></select>";
   html += "<label title='Bits de parada (stop bits) no final de cada byte serial. 1 e o padrao mais comum. Use 2 para maior tolerancia a ruido no barramento RS485.'>Stop Bits <span class='tip'>?</span></label><select name='stopBits'><option value='1'" + String(config.stopBits == 1 ? " selected" : "") + ">1</option><option value='2'" + String(config.stopBits == 2 ? " selected" : "") + ">2</option></select></div>";
@@ -1264,7 +1357,7 @@ String htmlPage(const String &status, const String &message = "") {
   html += "<tr><td>40002</td><td>Holding Register (FC 03/06)</td><td>0-1023</td><td>PWM Elevacao</td></tr>";
   html += "<tr><td>40003</td><td>Holding Register (FC 03/06)</td><td>0-1023</td><td>PWM Resistencia de aquecimento</td></tr>";
   html += "</table>";
-  html += "<p style='margin:4px 0;font-size:.82rem;color:var(--muted)'>Host: <span class='hl'>" + WiFi.localIP().toString() + "</span> | Porta: <span class='hl'>502</span> | Unit ID: <span class='hl'>" + String(config.deviceId) + "</span></p>";
+  html += "<p style='margin:4px 0;font-size:.82rem;color:var(--muted)'>Host: <span class='hl'>" + WiFi.localIP().toString() + "</span> | Porta: <span class='hl'>" + String(config.modbusTcpPort) + "</span> | Unit ID: <span class='hl'>" + String(config.deviceId) + "</span></p>";
 
   // Instrucoes MQTT
   {
@@ -1338,6 +1431,15 @@ void handleConfigPost() {
   candidate.gateway = webServer.arg("gateway");
   candidate.dns = webServer.arg("dns");
   candidate.deviceId = static_cast<uint8_t>(webServer.arg("deviceId").toInt());
+  String modbusTcpPortArg = webServer.arg("modbusTcpPort");
+  if (!modbusTcpPortArg.isEmpty()) {
+    uint16_t modbusTcpPortParsed = 0;
+    if (!parseUInt16Strict(modbusTcpPortArg, modbusTcpPortParsed)) {
+      webServer.send(400, "text/html", htmlPage(getStateName(), "Erro: Porta Modbus TCP invalida."));
+      return;
+    }
+    candidate.modbusTcpPort = modbusTcpPortParsed;
+  }
   candidate.baud = static_cast<uint32_t>(webServer.arg("baud").toInt());
   String parity = webServer.arg("parity");
   candidate.parity = parity.isEmpty() ? 'N' : parity[0];
@@ -1402,15 +1504,25 @@ void configureWebServer() {
 void stopProtocolServices() {
   mqttClient.disconnect();
   modbusTcpClient.stop();
+  if (modbusTcpServer != nullptr) {
+    modbusTcpServer->close();
+    delete modbusTcpServer;
+    modbusTcpServer = nullptr;
+  }
 }
 
 void startProtocolServices() {
   stopProtocolServices();
 
-  if (config.protocol == ActiveProtocol::MODBUS) {
+  if (config.protocol == ActiveProtocol::MODBUS_TCP) {
+    modbusTcpServer = new WiFiServer(config.modbusTcpPort);
+    modbusTcpServer->begin();
+    return;
+  }
+
+  if (config.protocol == ActiveProtocol::MODBUS_RTU) {
     configureRtu();
     syncModelToRtu();
-    modbusTcpServer.begin();
     return;
   }
 
@@ -1595,7 +1707,6 @@ void handleWriteSingleCoil(uint16_t addr, uint16_t value, uint8_t *request, uint
   }
 
   coils[addr] = (value == 0xFF00);
-  tcpWriteDirty = true;
   memcpy(response, request, 5);
   respLen = 5;
 }
@@ -1616,7 +1727,6 @@ void handleWriteSingleReg(uint16_t addr, uint16_t value, uint8_t *request, uint8
   }
 
   hregs[addr] = value;
-  tcpWriteDirty = true;
   memcpy(response, request, 5);
   respLen = 5;
 }
@@ -1679,8 +1789,12 @@ bool readTcpExact(uint8_t *buffer, size_t length, uint32_t timeoutMs) {
 }
 
 void serviceModbusTcp() {
+  if (modbusTcpServer == nullptr) {
+    return;
+  }
+
   if (!modbusTcpClient || !modbusTcpClient.connected()) {
-    modbusTcpClient = modbusTcpServer.accept();
+    modbusTcpClient = modbusTcpServer->accept();
     return;
   }
 
@@ -1778,10 +1892,12 @@ void setup() {
   loadConfig(config);
 
   ds18b20.begin();
+  ds18b20.setWaitForConversion(false);
   ds18b20AddressFound = initDs18b20Address();
+  dsConversionWaitMs = ds18b20.millisToWaitForConversion();
+  lastDsRequestMs = millis();
 
   configureWebServer();
-  configureRtu();
   initModbusRegisters();
   syncModelToRtu();
 
@@ -1807,15 +1923,16 @@ void loop() {
     lastSensorMs = now;
     updateSensorRegisters();
     updateDiscreteInputs();
-    if (isModbusProtocolActive()) {
-      syncModelToRtu();
+    if (isModbusRtuActive()) {
+      syncModelInputsToRtu();
     }
   }
 
   if (state == DeviceState::RUN_PROTOCOL) {
-    if (config.protocol == ActiveProtocol::MODBUS) {
-      modbusRtu.task();
+    if (isModbusTcpActive()) {
       serviceModbusTcp();
+    } else if (isModbusRtuActive()) {
+      modbusRtu.task();
     } else if (config.protocol == ActiveProtocol::MQTT) {
       serviceMqtt();
     } else if (config.protocol == ActiveProtocol::OPCUA) {
@@ -1823,18 +1940,13 @@ void loop() {
     }
   }
 
-  if (isModbusProtocolActive() && now - lastModbusSyncMs >= MODBUS_SYNC_PERIOD_MS) {
+  if (isModbusRtuActive() && now - lastModbusSyncMs >= MODBUS_SYNC_PERIOD_MS) {
     lastModbusSyncMs = now;
-    if (tcpWriteDirty) {
-      syncModelToRtu();
-      tcpWriteDirty = false;
-    } else {
-      syncRtuToModel();
-    }
+    syncRtuOutputsToModel();
   }
 
   if (now - lastIoMs >= IO_PERIOD_MS) {
     lastIoMs = now;
-    applyOutputs();
+    applyOutputsIfChanged();
   }
 }

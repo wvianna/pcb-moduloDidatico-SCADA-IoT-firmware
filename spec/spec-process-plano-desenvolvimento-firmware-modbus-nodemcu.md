@@ -13,7 +13,7 @@ Este documento define o plano tecnico para o firmware do NodeMCU com selecao de 
 
 ## 1. Purpose & Scope
 
-Objetivo: manter a base didatica atual e evoluir para operacao por modo exclusivo (`modbus`, `mqtt`, `opcua`) sem regressao de I/O, sensores, setup AP e rede estatica.
+Objetivo: manter a base didatica atual e evoluir para operacao por modo exclusivo (`modbustcp`, `modbusrtu`, `mqtt`, `opcua`) sem regressao de I/O, sensores, setup AP e rede estatica.
 
 Escopo:
 
@@ -40,14 +40,15 @@ Fora de escopo:
 
 ### Requisitos funcionais
 
-- REQ-001: Permitir selecao de protocolo ativo no setup web (`modbus`, `mqtt`, `opcua`).
-- REQ-002: Em modo `modbus`, manter Modbus TCP + RTU funcional sem regressao.
+- REQ-001: Permitir selecao de protocolo ativo no setup web (`modbustcp`, `modbusrtu`, `mqtt`, `opcua`).
+- REQ-002: Em modo `modbustcp`, manter Modbus TCP funcional; em modo `modbusrtu`, manter Modbus RTU funcional; sem regressao.
 - REQ-003: Em modo `mqtt`, publicar entradas em JSON no broker.
 - REQ-004: Em modo `mqtt`, receber comando de saidas por subscribe JSON.
 - REQ-005: Em modo `opcua`, disponibilizar configuracao de endpoint no setup web.
 - REQ-006: Persistir SSID, PSK, IP, mascara, gateway, DNS, protocolo ativo e parametros por protocolo.
 - REQ-007: Validar IPv4 e impedir saida de AP em configuracao invalida.
 - REQ-008: Preservar mapa de pinos e registradores existente.
+- REQ-009: Permitir configurar a porta do servico Modbus TCP no setup web e persisti-la em `/config.txt` (padrao 502).
 
 ### Restricoes tecnicas
 
@@ -76,7 +77,7 @@ Chaves minimas:
 
 - Wi-Fi/rede: `ssid`, `psk`, `ip`, `mask`, `gateway`, `dns`
 - Protocolo: `protocol`
-- Modbus: `deviceId`, `baud`, `parity`, `stopBits`
+- Modbus: `deviceId`, `modbusTcpPort`, `baud`, `parity`, `stopBits`
 - MQTT: `mqttBroker`, `mqttPort`, `mqttUser`, `mqttPass`, `mqttTopicBase`
 - OPC UA: `opcUaPublisherId`, `opcUaDataSetWriterId`
 
@@ -94,7 +95,7 @@ Campos obrigatorios globais:
 
 Campos condicionais:
 
-- Modbus: Device ID, Baud, Paridade, Stop Bits
+- Modbus: Device ID, Porta Modbus TCP, Baud, Paridade, Stop Bits
 - MQTT: Broker, Porta, Usuario, Senha, Topico base
 - OPC UA: Host, Porta
 
@@ -137,7 +138,7 @@ Regras:
 - AC-001: Com RX/GPIO3 baixo no boot, dispositivo entra em AP com SSID `NodeMCU_Setup_<ChipID>`.
 - AC-002: Configuracao de rede invalida mantem AP.
 - AC-003: Configuracao valida persiste apos reboot.
-- AC-004: Em modo `modbus`, Modbus TCP/RTU responde conforme mapa atual.
+- AC-004: Em modo `modbustcp`, Modbus TCP responde conforme mapa atual; em modo `modbusrtu`, Modbus RTU responde conforme mapa atual.
 - AC-005: Em modo `mqtt`, entradas publicam JSON no broker.
 - AC-006: Em modo `mqtt`, JSON de comando altera coils e HREGs.
 - AC-007: Troca de protocolo no setup ativa apenas um servico por vez.

@@ -768,8 +768,10 @@ O script `test/modbus-outputs.py` testa as saídas do módulo (escrita via Modbu
 Requer: `pip install pymodbus` (pymodbus ≥ 3.x).
 
 ```bash
-# Uso: python test/modbus-outputs.py [HOST] [PORT] [UNIT_ID]
+# Uso: python test/modbus-outputs.py [HOST] [PORT] [UNIT_ID] [--coils-only]
 python test/modbus-outputs.py 192.168.100.204 502 1
+# Somente as saídas digitais (coils), sem o teste de PWM:
+python test/modbus-outputs.py 192.168.100.204 502 1 --coils-only
 ```
 
 Exemplo de saída:

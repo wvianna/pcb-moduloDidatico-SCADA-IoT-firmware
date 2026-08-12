@@ -6,11 +6,12 @@
   intervalo de 2 s, e retorna a 0% ao final (estado seguro).
 
 Uso:
-    python test/modbus-outputs.py [HOST] [PORT] [UNIT_ID]
+    python test/modbus-outputs.py [HOST] [PORT] [UNIT_ID] [--coils-only]
 
 Exemplos:
     python test/modbus-outputs.py
     python test/modbus-outputs.py 192.168.100.204 502 1
+    python test/modbus-outputs.py 192.168.100.204 502 1 --coils-only  # somente coils
 
 Dependencia:
     pip install pymodbus
@@ -44,11 +45,15 @@ def pwm_value(percent: int) -> int:
 
 
 def main() -> None:
-    host = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_HOST
-    port = int(sys.argv[2]) if len(sys.argv) > 2 else DEFAULT_PORT
-    unit = int(sys.argv[3]) if len(sys.argv) > 3 else DEFAULT_UNIT
+    args = [a for a in sys.argv[1:] if a != "--coils-only"]
+    coils_only = "--coils-only" in sys.argv
 
-    print(f"Conectando em Modbus TCP {host}:{port} (unit_id={unit}) ...")
+    host = args[0] if len(args) > 0 else DEFAULT_HOST
+    port = int(args[1]) if len(args) > 1 else DEFAULT_PORT
+    unit = int(args[2]) if len(args) > 2 else DEFAULT_UNIT
+
+    scope = "coils" if coils_only else "coils + PWM"
+    print(f"Conectando em Modbus TCP {host}:{port} (unit_id={unit}) | escopo: {scope} ...")
     client = ModbusTcpClient(host, port=port, timeout=3, retries=1)
     if not client.connect():
         print(
@@ -76,21 +81,23 @@ def main() -> None:
                 time.sleep(INTERVAL_S)
         print("Coils finalizados (todos OFF).\n")
 
-        # --- PWM: varrer 0..100% em passos de 25% ---
-        print("=== Teste PWM (holding registers, 0 a 100%, step 25%, intervalo 2 s) ===")
-        for pct in PERCENT_STEPS:
-            value = pwm_value(pct)
-            for addr in range(HOLDING_REGS):
-                client.write_register(addr, value, device_id=unit)
-            r = client.read_holding_registers(0, count=HOLDING_REGS, device_id=unit)
-            print(f"{pct:>3}% -> valor {value:>4} | hregs: {r.registers[:HOLDING_REGS]}")
-            time.sleep(INTERVAL_S)
+        # --- PWM: varrer 0..100% em passos de 25% (opcional) ---
+        if not coils_only:
+            print("=== Teste PWM (holding registers, 0 a 100%, step 25%, intervalo 2 s) ===")
+            for pct in PERCENT_STEPS:
+                value = pwm_value(pct)
+                for addr in range(HOLDING_REGS):
+                    client.write_register(addr, value, device_id=unit)
+                r = client.read_holding_registers(0, count=HOLDING_REGS, device_id=unit)
+                print(f"{pct:>3}% -> valor {value:>4} | hregs: {r.registers[:HOLDING_REGS]}")
+                time.sleep(INTERVAL_S)
 
-        # --- Retorna a 0% (estado seguro) ---
-        for addr in range(HOLDING_REGS):
-            client.write_register(addr, 0, device_id=unit)
-        r = client.read_holding_registers(0, count=HOLDING_REGS, device_id=unit)
-        print(f"Reset -> hregs: {r.registers[:HOLDING_REGS]}")
+            # --- Retorna a 0% (estado seguro) ---
+            for addr in range(HOLDING_REGS):
+                client.write_register(addr, 0, device_id=unit)
+            r = client.read_holding_registers(0, count=HOLDING_REGS, device_id=unit)
+            print(f"Reset -> hregs: {r.registers[:HOLDING_REGS]}")
+
         print("\nTeste concluido. Saidas em estado seguro (coils OFF, PWM 0%).")
     finally:
         client.close()

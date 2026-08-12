@@ -252,7 +252,7 @@ constexpr uint8_t PIN_PWM_ELEVATION = D3;  // GPIO0
 constexpr uint8_t PIN_PWM_HEATER = D1;     // GPIO5 (dedicado a resistencia de aquecimento)
 
 // Frequencia do PWM das saidas PWM (azimute, elevacao e resistencia).
-// Padrao do ESP8266 e 1000 Hz; 100 Hz e adequado para motores/resistencia.
+// Padrao do ESP8266 e 1000 Hz; 50 Hz e adequado para motores/resistencia.
 constexpr uint32_t PWM_FREQ_HZ = 100;
 
 // RS485 MAX485: RO = D5 (RX), DI = D6 (TX), DE/RE = D4 para nao conflitar com PWM em D3.

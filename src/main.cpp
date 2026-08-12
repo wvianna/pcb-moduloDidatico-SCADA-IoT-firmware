@@ -261,6 +261,9 @@ constexpr uint16_t MODBUS_TCP_PORT_DEFAULT = 502;
 constexpr uint8_t MODBUS_UNIT_ID_DEFAULT = 1;
 constexpr uint32_t WIFI_CONNECT_TIMEOUT_MS = 30000UL;
 constexpr uint32_t SENSOR_PERIOD_MS = 1200UL;
+// Intervalo minimo entre disparo e leitura da conversao do DS18B20.
+// Evita ler o scratchpad antes da conversao terminar (0 periodico no barramento).
+constexpr uint16_t DS18B20_MIN_CONVERSION_WAIT_MS = 500;
 constexpr uint32_t IO_PERIOD_MS = 60UL;
 constexpr uint32_t MODBUS_SYNC_PERIOD_MS = 25UL;
 constexpr uint32_t MQTT_PUBLISH_PERIOD_MS = 1200UL;
@@ -355,7 +358,7 @@ unsigned long lastModbusSyncMs = 0;
 unsigned long lastMqttPublishMs = 0;
 unsigned long lastMqttReconnectMs = 0;
 unsigned long lastDsRequestMs = 0;
-uint16_t dsConversionWaitMs = 750;
+uint16_t dsConversionWaitMs = DS18B20_MIN_CONVERSION_WAIT_MS;
 unsigned long apSaveAtMs = 0;
 bool pendingConnectAfterSave = false;
 
@@ -1180,16 +1183,21 @@ bool initDs18b20Address() {
 void updateSensorRegisters() {
   iregs[0] = safeAnalogRead();
 
-  // Leitura nao bloqueante: dispara a conversao e, quando o tempo de conversao
-  // ja foi atingido, coleta o resultado. Isso evita travar o loop por ~750 ms
-  // (resolucao 12 bits) a cada ciclo, mantendo Modbus/web/MQTT responsivos.
+  // Leitura nao bloqueante: dispara a conversao e, quando o tempo minimo de
+  // conversao ja foi atingido, coleta o resultado. Isso evita travar o loop
+  // por ~750 ms (resolucao 12 bits) a cada ciclo, mantendo Modbus/web/MQTT
+  // responsivos. O intervalo entre disparo e leitura e de pelo menos
+  // DS18B20_MIN_CONVERSION_WAIT_MS (500 ms).
   unsigned long now = millis();
   if (now - lastDsRequestMs >= dsConversionWaitMs) {
-    float dsTemp = DEVICE_DISCONNECTED_C;
     if (ds18b20AddressFound) {
-      dsTemp = ds18b20.getTempC(ds18b20Address);
+      float dsTemp = ds18b20.getTempC(ds18b20Address);
+      // Em falha transitória de leitura (CRC/ruido no barramento 1-Wire),
+      // mantém o último valor válido em vez de publicar 0 no registrador.
+      if (dsTemp != DEVICE_DISCONNECTED_C && !isnan(dsTemp)) {
+        iregs[1] = ds18b20ToTenthC(dsTemp);
+      }
     }
-    iregs[1] = ds18b20ToTenthC(dsTemp);
 
     ds18b20.requestTemperatures();  // setWaitForConversion(false): retorna imediatamente
     lastDsRequestMs = now;
@@ -1894,7 +1902,17 @@ void setup() {
   ds18b20.begin();
   ds18b20.setWaitForConversion(false);
   ds18b20AddressFound = initDs18b20Address();
+  // Garante tempo minimo de conversao do DS18B20 (>= 500 ms) antes da leitura,
+  // evitando leituras prematuras/instaveis que geram 0 periodico no barramento.
   dsConversionWaitMs = ds18b20.millisToWaitForConversion();
+  if (dsConversionWaitMs < DS18B20_MIN_CONVERSION_WAIT_MS) {
+    dsConversionWaitMs = DS18B20_MIN_CONVERSION_WAIT_MS;
+  }
+  // Dispara a primeira conversao no boot: a leitura so ocorre apos
+  // dsConversionWaitMs, entao o primeiro valor ja e valido.
+  if (ds18b20AddressFound) {
+    ds18b20.requestTemperatures();
+  }
   lastDsRequestMs = millis();
 
   configureWebServer();

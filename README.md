@@ -344,6 +344,7 @@ Requer protocolo `Modbus TCP` selecionado no setup.
 
 - Configurável na página de setup (campo **Modbus TCP Porta**); padrão `502`.
 - O serviço escuta na porta persistida em `/config.txt` (`modbusTcpPort`).
+- Suporta **múltiplos clientes Modbus TCP simultâneos** (até 4) — Python, Node-RED e SCADA/IHM podem ler/escrever ao mesmo tempo.
 - Para conexões fora do padrão, use a mesma porta nos scripts/SCADA (ex.: `python test/modbus-read.py <ip> <porta> 1`).
 
 #### Mapa de endereçamento Modbus
@@ -360,7 +361,9 @@ Endereçamento idêntico ao exibido no help da página web de setup:
 | 40002 | Holding Register (FC 03/06) | 0-1023 | PWM Elevação |
 | 40003 | Holding Register (FC 03/06) | 0-1023 | PWM Resistência de aquecimento |
 
-> O mesmo mapa vale para Modbus RTU (via RS485).
+> O firmware aguarda no mínimo **500 ms** entre o disparo e a leitura da conversão do DS18B20
+> (`DS18B20_MIN_CONVERSION_WAIT_MS`), evitando valores `0` transitórios no registrador 30002
+> (falhas transitórias de leitura mantêm o último valor válido).
 
 ### Funções implementadas
 

@@ -205,8 +205,8 @@ namespace {
 // Note 192: Problemas intermitentes de leitura costumam envolver timing, fragmentacao ou estado de socket.
 // Note 193: Encerrar socket em erro de frame evita lock de sessao parcialmente lida.
 // Note 194: O servidor aceita novo cliente quando conexao atual cai ou invalida.
-// Note 195: Em cenarios multi-cliente, seria necessario gerenciar lista de sockets.
-// Note 196: O ESP8266 tem recursos limitados, entao single-client simplifica estabilidade.
+// Note 195: O servidor mantem lista fixa de ate MODBUS_TCP_MAX_CLIENTS sockets (multi-cliente).
+// Note 196: Suporte a multiplos clientes evita que um cliente ocioso trave os demais.
 // Note 197: Para producao, definir politicas de reconexao e limite de taxa pode evitar abuso.
 // Note 198: Esta base pode evoluir para autenticar setup web em ambiente compartilhado.
 // Note 199: Sem autenticacao, qualquer cliente na rede AP pode alterar configuracao.
@@ -263,7 +263,7 @@ constexpr uint32_t WIFI_CONNECT_TIMEOUT_MS = 30000UL;
 constexpr uint32_t SENSOR_PERIOD_MS = 1200UL;
 // Intervalo minimo entre disparo e leitura da conversao do DS18B20.
 // Evita ler o scratchpad antes da conversao terminar (0 periodico no barramento).
-constexpr uint16_t DS18B20_MIN_CONVERSION_WAIT_MS = 500;
+constexpr uint16_t DS18B20_MIN_CONVERSION_WAIT_MS = 1000;
 constexpr uint32_t IO_PERIOD_MS = 60UL;
 constexpr uint32_t MODBUS_SYNC_PERIOD_MS = 25UL;
 constexpr uint32_t MQTT_PUBLISH_PERIOD_MS = 1200UL;
@@ -327,10 +327,13 @@ struct DeviceConfig {
 DeviceConfig config;
 DeviceState state = DeviceState::BOOT;
 
+// Suporte a multiplos clientes Modbus TCP simultaneos (Python + Node-RED +
+// SCADA/IHM ao mesmo tempo). Array fixo evita alocacao dinamica em runtime.
+constexpr uint8_t MODBUS_TCP_MAX_CLIENTS = 4;
 ESP8266WebServer webServer(80);
 // Servidor Modbus TCP alocado dinamicamente para permitir porta configuravel.
 WiFiServer *modbusTcpServer = nullptr;
-WiFiClient modbusTcpClient;
+WiFiClient modbusTcpClients[MODBUS_TCP_MAX_CLIENTS];
 WiFiClient mqttNetClient;
 PubSubClient mqttClient(mqttNetClient);
 
@@ -1426,7 +1429,7 @@ void handleRoot() {
 }
 
 void handleHealth() {
-  String payload = "{\"state\":\"" + getStateName() + "\",\"protocol\":\"" + String(protocolToCString(config.protocol)) + "\",\"ip\":\"" + WiFi.localIP().toString() + "\",\"ap\":\"" + WiFi.softAPIP().toString() + "\",\"opcuaRuntimeSupported\":" + String(opcUaRuntimeSupported ? "true" : "false") + "}";
+  String payload = "{\"state\":\"" + getStateName() + "\",\"protocol\":\"" + String(protocolToCString(config.protocol)) + "\",\"ip\":\"" + WiFi.localIP().toString() + "\",\"ap\":\"" + WiFi.softAPIP().toString() + "\",\"modbusTcpPort\":" + String(config.modbusTcpPort) + ",\"modbusTcpServerUp\":" + String(modbusTcpServer != nullptr ? "true" : "false") + ",\"opcuaRuntimeSupported\":" + String(opcUaRuntimeSupported ? "true" : "false") + "}";
   webServer.send(200, "application/json", payload);
 }
 
@@ -1511,7 +1514,9 @@ void configureWebServer() {
 
 void stopProtocolServices() {
   mqttClient.disconnect();
-  modbusTcpClient.stop();
+  for (uint8_t i = 0; i < MODBUS_TCP_MAX_CLIENTS; i++) {
+    modbusTcpClients[i].stop();
+  }
   if (modbusTcpServer != nullptr) {
     modbusTcpServer->close();
     delete modbusTcpServer;
@@ -1523,6 +1528,8 @@ void startProtocolServices() {
   stopProtocolServices();
 
   if (config.protocol == ActiveProtocol::MODBUS_TCP) {
+    // Construtor com 1 argumento usa MAX_CLIENTS (default = 4) do core,
+    // suficiente para os multiplos clientes mantidos no array fixo.
     modbusTcpServer = new WiFiServer(config.modbusTcpPort);
     modbusTcpServer->begin();
     return;
@@ -1769,16 +1776,16 @@ bool handleModbusTcpPdu(uint8_t *request, uint16_t reqLen, uint8_t *response, ui
   }
 }
 
-bool readTcpExact(uint8_t *buffer, size_t length, uint32_t timeoutMs) {
+bool readTcpExact(WiFiClient &client, uint8_t *buffer, size_t length, uint32_t timeoutMs) {
   size_t offset = 0;
   unsigned long lastProgressMs = millis();
 
   while (offset < length) {
-    if (!modbusTcpClient || !modbusTcpClient.connected()) {
+    if (!client || !client.connected()) {
       return false;
     }
 
-    int chunk = modbusTcpClient.read(buffer + offset, length - offset);
+    int chunk = client.read(buffer + offset, length - offset);
     if (chunk > 0) {
       offset += static_cast<size_t>(chunk);
       lastProgressMs = millis();
@@ -1801,49 +1808,73 @@ void serviceModbusTcp() {
     return;
   }
 
-  if (!modbusTcpClient || !modbusTcpClient.connected()) {
-    modbusTcpClient = modbusTcpServer->accept();
-    return;
+  // Aceita novos clientes enquanto houver slot livre. Sem slot, aceita e fecha
+  // imediatamente para liberar o backlog de conexoes (evita backlog cheio).
+  while (modbusTcpServer->hasClient()) {
+    int8_t slot = -1;
+    for (uint8_t i = 0; i < MODBUS_TCP_MAX_CLIENTS; i++) {
+      if (!modbusTcpClients[i] || !modbusTcpClients[i].connected()) {
+        slot = static_cast<int8_t>(i);
+        break;
+      }
+    }
+
+    if (slot < 0) {
+      WiFiClient dropped = modbusTcpServer->accept();
+      dropped.stop();
+      break;
+    }
+
+    modbusTcpClients[slot] = modbusTcpServer->accept();
   }
 
-  while (modbusTcpClient.available() >= 7) {
-    uint8_t mbap[7];
-    if (!readTcpExact(mbap, sizeof(mbap), MODBUS_TCP_READ_TIMEOUT_MS)) {
-      modbusTcpClient.stop();
-      return;
+  // Atende cada cliente conectado (loop cooperativo, nao bloqueante).
+  for (uint8_t i = 0; i < MODBUS_TCP_MAX_CLIENTS; i++) {
+    WiFiClient &client = modbusTcpClients[i];
+    if (!client || !client.connected()) {
+      continue;
     }
 
-    uint16_t protocol = (static_cast<uint16_t>(mbap[2]) << 8) | mbap[3];
-    uint16_t length = (static_cast<uint16_t>(mbap[4]) << 8) | mbap[5];
-    if (protocol != 0 || length < 2 || length > 254) {
-      return;
+    while (client.available() >= 7) {
+      uint8_t mbap[7];
+      if (!readTcpExact(client, mbap, sizeof(mbap), MODBUS_TCP_READ_TIMEOUT_MS)) {
+        client.stop();
+        break;
+      }
+
+      uint16_t protocol = (static_cast<uint16_t>(mbap[2]) << 8) | mbap[3];
+      uint16_t length = (static_cast<uint16_t>(mbap[4]) << 8) | mbap[5];
+      if (protocol != 0 || length < 2 || length > 254) {
+        client.stop();
+        break;
+      }
+
+      uint16_t pduLen = length - 1;
+      uint8_t reqPdu[253] = {0};
+      if (!readTcpExact(client, reqPdu, pduLen, MODBUS_TCP_READ_TIMEOUT_MS)) {
+        client.stop();
+        break;
+      }
+
+      uint8_t respPdu[253] = {0};
+      uint16_t respLen = 0;
+      if (!handleModbusTcpPdu(reqPdu, pduLen, respPdu, respLen)) {
+        break;
+      }
+
+      uint8_t outMbap[7];
+      memcpy(outMbap, mbap, 7);
+      outMbap[4] = ((respLen + 1) >> 8) & 0xFF;
+      outMbap[5] = (respLen + 1) & 0xFF;
+      outMbap[6] = mbap[6];
+
+      // Envia MBAP+PDU em um unico write para evitar clientes que falham
+      // quando a resposta chega fragmentada em multiplos segmentos TCP.
+      uint8_t outFrame[260] = {0};
+      memcpy(outFrame, outMbap, 7);
+      memcpy(outFrame + 7, respPdu, respLen);
+      client.write(outFrame, 7 + respLen);
     }
-
-    uint16_t pduLen = length - 1;
-    uint8_t reqPdu[253] = {0};
-    if (!readTcpExact(reqPdu, pduLen, MODBUS_TCP_READ_TIMEOUT_MS)) {
-      modbusTcpClient.stop();
-      return;
-    }
-
-    uint8_t respPdu[253] = {0};
-    uint16_t respLen = 0;
-    if (!handleModbusTcpPdu(reqPdu, pduLen, respPdu, respLen)) {
-      return;
-    }
-
-    uint8_t outMbap[7];
-    memcpy(outMbap, mbap, 7);
-    outMbap[4] = ((respLen + 1) >> 8) & 0xFF;
-    outMbap[5] = (respLen + 1) & 0xFF;
-    outMbap[6] = mbap[6];
-
-    // Envia MBAP+PDU em um unico write para evitar clientes que falham
-    // quando a resposta chega fragmentada em multiplos segmentos TCP.
-    uint8_t outFrame[260] = {0};
-    memcpy(outFrame, outMbap, 7);
-    memcpy(outFrame + 7, respPdu, respLen);
-    modbusTcpClient.write(outFrame, 7 + respLen);
   }
 }
 

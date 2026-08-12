@@ -61,6 +61,7 @@ O arquivo principal de firmware é `src/main.cpp`.
 ### Modbus TCP
 
 - Implementação manual da camada Modbus TCP em `serviceModbusTcp()`.
+- Suporte a **múltiplos clientes simultâneos** (array fixo `modbusTcpClients[MODBUS_TCP_MAX_CLIENTS]`, padrão 4) — Python, Node-RED e SCADA/IHM ao mesmo tempo, sem travamento de conexão.
 - Funções suportadas:
   - `0x01` Read Coils
   - `0x02` Read Discrete Inputs
@@ -124,7 +125,7 @@ O firmware foi refatorado para melhorar o desempenho e a responsividade do loop:
   - `modbustcp`: apenas `serviceModbusTcp()` roda; escrita vai direto ao modelo, sem sincronização.
   - `modbusrtu`: apenas `modbusRtu.task()` roda; a sincronização é direcional (entradas → banco, saídas → modelo).
   - `modbus` legado no arquivo de configuração é interpretado como `modbustcp` (compatibilidade).
-- **DS18B20 não bloqueante**: `setWaitForConversion(false)` + leitura por `millis()` elimina o bloqueio de ~750 ms por ciclo (antes, o loop travava durante toda a conversão).
+- **DS18B20 não bloqueante**: `setWaitForConversion(false)` + leitura por `millis()` elimina o bloqueio de ~750 ms por ciclo (antes, o loop travava durante toda a conversão). O intervalo entre disparo e leitura é garantido ≥ **500 ms** (`DS18B20_MIN_CONVERSION_WAIT_MS`), a primeira conversão é disparada no boot, e falhas transitórias de leitura (CRC/ruído 1-Wire) mantêm o último valor válido em vez de publicar `0` no registrador 30002.
 - **Saídas aplicadas sob demanda**: `applyOutputsIfChanged()` evita reescrever pinos (`analogWrite`/`digitalWrite`) a cada 60 ms quando nada mudou.
 - **Boot/troca de protocolo mais rápidos**: removido o `delay(2000)` da lib `ModbusSerial::config`.
 - **Configuração RTU tardia**: `configureRtu()` deixou de ser chamada no `setup()`; agora é chamada apenas ao entrar no modo `modbusrtu`, poupando tempo de inicialização nos modos TCP/MQTT/OPC UA.

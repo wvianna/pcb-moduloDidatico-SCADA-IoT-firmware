@@ -4,7 +4,7 @@ Este firmware transforma um NodeMCU v2 (ESP8266) em um dispositivo de automaçã
 
 Saídas discretas - 2 que podem ser usadas para acionamento de uma ponte H interna ou Buzzer ou Rele.
 
-Entradas digitais - 2 tipo contato seco externo ou switch onboard da PCB. A ED2 é usada para o nodemcu entrar no modo de setup duranta a inicialização.
+Entradas digitais - 2 tipo contato seco externo ou switch onboard da PCB. A ED1 é usada para o nodemcu entrar no modo de setup duranta a inicialização.
 
 Entrada analógica - 1 entrada anlógica com sinal de um potenciômetro onboard.
 
@@ -36,27 +36,23 @@ Saídas discretas PWM - 3 usadas para movimento azimutal e elevação de servo m
     - [Sensores suportados](#sensores-suportados)
     - [Comunicação serial industrial](#comunicação-serial-industrial)
     - [Cargas e indicação visual](#cargas-e-indicação-visual)
-  - [4. Atenções elétricas importantes](#4-atenções-elétricas-importantes)
-    - [1. Não ligue cargas diretamente em GPIO sem proteção](#1-não-ligue-cargas-diretamente-em-gpio-sem-proteção)
-    - [2. Pinos críticos do ESP8266](#2-pinos-críticos-do-esp8266)
-    - [3. Conflito de pinagem resolvido](#3-conflito-de-pinagem-resolvido)
-  - [5. Pinagem usada pelo firmware](#5-pinagem-usada-pelo-firmware)
+  - [4. Pinagem usada pelo firmware](#4-pinagem-usada-pelo-firmware)
     - [Coils](#coils)
     - [Entradas discretas](#entradas-discretas)
     - [Input registers](#input-registers)
     - [Holding registers](#holding-registers)
     - [RS485 com MAX485](#rs485-com-max485)
-  - [6. Ligações elétricas sugeridas](#6-ligações-elétricas-sugeridas)
+  - [5. Ligações elétricas sugeridas](#5-ligações-elétricas-sugeridas)
     - [1. LEDs nas coils](#1-leds-nas-coils)
     - [2. DS18B20](#2-ds18b20)
     - [3. MAX485](#3-max485)
-  - [7. Primeiros passos — configuração inicial](#7-primeiros-passos--configuração-inicial)
+  - [6. Primeiros passos — configuração inicial](#6-primeiros-passos--configuração-inicial)
     - [Entrando no modo AP](#entrando-no-modo-ap)
     - [Página web de configuração](#página-web-de-configuração)
     - [Seleção do protocolo ativo](#seleção-do-protocolo-ativo)
     - [Configuração padrão de fábrica](#configuração-padrão-de-fábrica)
-  - [8. Protocolos de comunicação](#8-protocolos-de-comunicação)
-  - [9. Referência da configuração persistida](#9-referência-da-configuração-persistida)
+  - [7. Protocolos de comunicação](#7-protocolos-de-comunicação)
+  - [8. Referência da configuração persistida](#8-referência-da-configuração-persistida)
     - [Chaves Persistidas em LittleFS](#chaves-persistidas-em-littlefs)
     - [Regras de runtime](#regras-de-runtime)
     - [Modbus TCP](#modbus-tcp)
@@ -75,21 +71,24 @@ Saídas discretas PWM - 3 usadas para movimento azimutal e elevação de servo m
       - [Comandos de saída](#comandos-de-saída)
       - [Integração com Node-RED](#integração-com-node-red)
     - [Comportamentos visuais e de diagnóstico](#comportamentos-visuais-e-de-diagnóstico)
-  - [10. Compilação e gravação](#10-compilação-e-gravação)
+  - [9. Compilação e gravação](#9-compilação-e-gravação)
     - [Compilar](#compilar)
     - [Gravar na placa](#gravar-na-placa)
     - [Abrir monitor serial](#abrir-monitor-serial)
-  - [11. Troubleshooting](#11-troubleshooting)
+  - [10. Troubleshooting](#10-troubleshooting)
     - [A placa responde a ping mas não abre a porta 502](#a-placa-responde-a-ping-mas-não-abre-a-porta-502)
     - [O modo AP não apareceu](#o-modo-ap-não-apareceu)
     - [A saída não acionou](#a-saída-não-acionou)
     - [RS485 não respondeu](#rs485-não-respondeu)
-  - [12. Diagramas](#12-diagramas)
+  - [11. Diagramas](#11-diagramas)
     - [Fluxo de configuração e operação](#fluxo-de-configuração-e-operação)
     - [Visão de ligação simplificada](#visão-de-ligação-simplificada)
-  - [13. Arquivos importantes do projeto](#13-arquivos-importantes-do-projeto)
-  - [14. Testes de integração](#14-testes-de-integração)
+  - [12. Arquivos importantes do projeto](#12-arquivos-importantes-do-projeto)
+  - [13. Testes de integração](#13-testes-de-integração)
     - [Modbus TCP — leitura e escrita](#modbus-tcp--leitura-e-escrita)
+      - [Leitura rápida — script Python (somente leitura)](#leitura-rápida--script-python-somente-leitura)
+      - [Saídas — script Python (coils e PWM)](#saídas--script-python-coils-e-pwm)
+      - [Monitorar entrada analógica — script Python](#monitorar-entrada-analógica--script-python)
     - [Modbus RTU — leitura e escrita](#modbus-rtu--leitura-e-escrita)
     - [MQTT — publish e subscribe](#mqtt--publish-e-subscribe)
       - [Assinar o tópico de entradas (leitura)](#assinar-o-tópico-de-entradas-leitura)
@@ -123,7 +122,7 @@ Saídas discretas PWM - 3 usadas para movimento azimutal e elevação de servo m
 
 ```mermaid
 flowchart TD
-  A[Boot do NodeMCU] --> B{RX/GPIO3 em nível baixo?}
+  A[Boot do NodeMCU] --> B{D8/GPIO15 em nível baixo?}
   B -->|Sim| C[Modo AP]
   B -->|Não| D[Conectar ao Wi-Fi configurado]
   C --> E[Servidor web de setup]
@@ -171,37 +170,7 @@ flowchart LR
 - LEDs com resistor de limitação para testes de coils
 - Ou módulos de relé / transistores apropriados para cargas reais
 
-## 4. Atenções elétricas importantes
-
-> Leia esta seção antes de montar a bancada.
-
-### 1. Não ligue cargas diretamente em GPIO sem proteção
-
-Para LEDs:
-
-- use resistor em série
-
-Para relés, motores ou cargas maiores:
-
-- use driver, transistor ou módulo dedicado
-
-### 2. Pinos críticos do ESP8266
-
-Este firmware usa alguns pinos sensíveis do ESP8266.
-
-- `GPIO0 / D3`: também participa do boot da placa
-- `GPIO15 / D8`: pino de bootstrap (use como entrada discreta 10001; não use como gatilho de setup)
-- `GPIO1 / TX` e `GPIO3 / RX`: UART nativa (`RX` também é usado como gatilho de setup AP quando o debug serial está desativado)
-Isso é aceitável para uso didático, mas exige cuidado em hardware real.
-
-### 3. Conflito de pinagem resolvido
-
-O conflito entre `PWM elevação` e direção `DE/RE` do RS485 foi resolvido com separação de pinos:
-
-- `PWM elevação` permanece em `D3 / GPIO0`
-- direção `DE/RE` do RS485 foi movida para `D4 / GPIO2`
-
-## 5. Pinagem usada pelo firmware
+## 4. Pinagem usada pelo firmware
 
 O mesmo mapeamento de I/O vale para todos os protocolos (Modbus, MQTT e OPC UA). O significado dos dados muda conforme o protocolo, mas os pinos físicos permanecem os mesmos.
 
@@ -216,8 +185,8 @@ O mesmo mapeamento de I/O vale para todos os protocolos (Modbus, MQTT e OPC UA).
 
 | Tipo | Base 1 | Base 0 | Função | Pino | GPIO |
 | --- | ---: | ---: | --- | --- | --- |
-| Discrete Input | 10001 | 0 | Entrada discreta 1 | D8 | GPIO15 |
-| Discrete Input | 10002 | 1 | Entrada discreta 2 | RX | GPIO3 (também gatilho de setup AP) |
+| Discrete Input | 10001 | 0 | Entrada discreta 1 | D8 | GPIO15 (também gatilho de setup AP) |
+| Discrete Input | 10002 | 1 | Entrada discreta 2 | RX | GPIO3 |
 
 ### Input registers
 
@@ -242,7 +211,7 @@ O mesmo mapeamento de I/O vale para todos os protocolos (Modbus, MQTT e OPC UA).
 | DI | D6 | GPIO12 |
 | DE + RE | D4 | GPIO2 |
 
-## 6. Ligações elétricas sugeridas
+## 5. Ligações elétricas sugeridas
 
 ### 1. LEDs nas coils
 
@@ -272,24 +241,24 @@ Ligação sugerida:
 - `GND` -> `GND`
 - `A/B` -> barramento RS485
 
-## 7. Primeiros passos — configuração inicial
+## 6. Primeiros passos — configuração inicial
 
 Antes de usar qualquer protocolo, configure o dispositivo uma única vez via modo AP. Essa configuração fica salva na flash e persiste após desligamento.
 
 ### Entrando no modo AP
 
-O firmware entra em setup se `RX / GPIO3` (entrada discreta ED2) estiver em nível baixo durante o boot.
+O firmware entra em setup se `D8 / GPIO15` (entrada discreta ED1) estiver em nível baixo durante o boot.
 
 Procedimento:
 
-1. Coloque `RX / GPIO3` em nível baixo (switch onboard da PCB para GND).
+1. Coloque `D8 / GPIO15` em nível baixo (switch onboard da PCB para GND).
 2. Ligue ou resete a placa.
 3. Solte o pino após o boot.
 4. Procure a rede Wi-Fi `NodeMCU_Setup_<ChipID>`.
 5. Conecte-se à rede.
 6. Acesse `192.168.4.1` no navegador.
 
-> **Notas:** `GPIO3` é o `RX` da UART nativa — esse gatilho **só está disponível quando o debug serial está desativado** (`SERIAL_DEBUG_ENABLED=false`, padrão). Diferente do `GPIO15`, ele **não é pino de bootstrap**: com `INPUT_PULLUP` o pino fica em nível alto por padrão, então o modo AP só é forçado quando o switch puxa para GND (0 V). Não afeta o modo de boot da placa.
+> **Atenção (hardware):** `GPIO15` é pino de bootstrap do ESP8266 — deve permanecer em nível **baixo** no instante do reset para o boot normal por flash. Na NodeMCU padrão o `GPIO15` tem pull-down (fica sempre baixo), então com este firmware o dispositivo **sempre entrará em AP**. Para o gatilho funcionar como modo opcional, a PCB precisa manter `GPIO15` baixo no reset (boot ok) e elevá-lo após o boot (pull-up), de modo que o switch para GND force o nível baixo apenas quando pressionado.
 
 ### Página web de configuração
 
@@ -351,13 +320,13 @@ Se nenhuma configuração tiver sido salva, o dispositivo usa estes valores padr
 - OPC UA Publisher ID: `NodeMCU_<ChipID>`
 - OPC UA DataSet Writer ID: `1`
 
-## 8. Protocolos de comunicação
+## 7. Protocolos de comunicação
 
 Esta seção detalha como acessar e usar cada protocolo após a placa estar conectada ao Wi-Fi.
 
 ---
 
-## 9. Referência da configuração persistida
+## 8. Referência da configuração persistida
 
 ### Chaves Persistidas em LittleFS
 
@@ -566,7 +535,7 @@ Para expor um servidor OPC UA completo a partir dos dados do NodeMCU:
 | Consultar estado | `GET http://<ip>/health` retorna JSON com estado, protocolo ativo e `opcuaRuntimeSupported` |
 | Reboot necessário | Após salvar configuração, a placa reinicia automaticamente |
 
-## 10. Compilação e gravação
+## 9. Compilação e gravação
 
 ### Compilar
 
@@ -590,7 +559,7 @@ Observação:
 
 - o projeto usa `monitor_speed = 115200` em `platformio.ini`
 
-## 11. Troubleshooting
+## 10. Troubleshooting
 
 ### A placa responde a ping mas não abre a porta 502
 
@@ -604,7 +573,7 @@ Solução:
 
 Verifique:
 
-- se `RX / GPIO3` foi realmente mantido em nível baixo durante o boot
+- se `D8 / GPIO15` foi realmente mantido em nível baixo durante o boot
 - se a placa reiniciou corretamente
 
 ### A saída não acionou
@@ -624,7 +593,7 @@ Verifique:
 - slave ID
 - polaridade do barramento `A/B`
 
-## 12. Diagramas
+## 11. Diagramas
 
 ### Fluxo de configuração e operação
 
@@ -635,7 +604,7 @@ sequenceDiagram
   participant R as Roteador
   participant S as SCADA
 
-  U->>N: Boot com RX/GPIO3 baixo
+  U->>N: Boot com D8/GPIO15 baixo
   N->>U: AP NodeMCU_Setup_<ChipID>
   U->>N: Acessa 192.168.4.1
   U->>N: Salva SSID, senha, IP e Modbus
@@ -662,7 +631,7 @@ flowchart LR
   NodeMCU --> SCADA
 ```
 
-## 13. Arquivos importantes do projeto
+## 12. Arquivos importantes do projeto
 
 | Arquivo | Conteúdo |
 | --- | --- |
@@ -677,7 +646,7 @@ flowchart LR
 
 ---
 
-## 14. Testes de integração
+## 13. Testes de integração
 
 Exemplos práticos de leitura e escrita para cada protocolo. Execute após a placa estar conectada ao Wi-Fi com o protocolo correspondente selecionado.
 

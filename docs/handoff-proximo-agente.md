@@ -184,8 +184,8 @@ Conclusão:
 
 ### Entradas discretas
 
-- Discrete input `10001` / base 0 `0`: `D8 / GPIO15`
-- Discrete input `10002` / base 0 `1`: `RX / GPIO3` (também gatilho de setup AP — dual use)
+- Discrete input `10001` / base 0 `0`: `D8 / GPIO15` (também gatilho de setup AP — dual use)
+- Discrete input `10002` / base 0 `1`: `RX / GPIO3`
 
 ### Sensores / input registers
 
@@ -206,9 +206,9 @@ Conclusão:
 
 ### Gatilho de setup AP
 
-- `RX / GPIO3` (ED2) ativo em nível baixo apenas durante o boot.
+- `D8 / GPIO15` (ED1) ativo em nível baixo apenas durante o boot.
 
-> **Notas:** `GPIO3` é o `RX` da UART nativa — o gatilho **só funciona com `SERIAL_DEBUG_ENABLED=false`** (RX livre). Não é pino de bootstrap: com `INPUT_PULLUP` o pino fica alto por padrão e o modo AP só é forçado quando o switch puxa para GND (0 V). `GPIO15/D8` (ED1) voltou a ser somente a entrada discreta 10001.
+> **Atenção:** `GPIO15` é pino de bootstrap do ESP8266. Na NodeMCU padrão ele tem pull-down (fica sempre baixo), então o dispositivo **sempre** entraria em modo AP. Para o gatilho ser opcional, a PCB precisa manter `GPIO15` baixo no instante do reset (boot normal) e elevá-lo após o boot (pull-up), com switch para GND pressionado para forçar o AP.
 
 ## Pendências e riscos conhecidos
 

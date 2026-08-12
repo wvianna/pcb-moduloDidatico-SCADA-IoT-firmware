@@ -200,6 +200,9 @@ O mesmo mapeamento de I/O vale para todos os protocolos (Modbus, MQTT e OPC UA).
 | Holding Register | 40003 | 2 | PWM resistência de aquecimento | D1 / GPIO5 | 0..1023 |
 
 > As saídas PWM operam em **50 Hz** (`analogWriteFreq(50)`), com duty cycle de 0 a 1023 (0 a 100 %).
+>
+> **Proteção térmica:** quando o DS18B20 ultrapassa **80 °C**, a saída PWM da resistência de aquecimento
+> (40003) é **forçada a 0**, independentemente do valor comandado. Abaixo de 80 °C, vale o valor do protocolo.
 
 ### RS485 com MAX485
 

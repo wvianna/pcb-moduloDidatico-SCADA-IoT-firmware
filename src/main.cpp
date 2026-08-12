@@ -253,7 +253,11 @@ constexpr uint8_t PIN_PWM_HEATER = D1;     // GPIO5 (dedicado a resistencia de a
 
 // Frequencia do PWM das saidas PWM (azimute, elevacao e resistencia).
 // Padrao do ESP8266 e 1000 Hz; 50 Hz e adequado para motores/resistencia.
-constexpr uint32_t PWM_FREQ_HZ = 100;
+constexpr uint32_t PWM_FREQ_HZ = 50;
+
+// Protecao termica da resistencia de aquecimento: acima desta temperatura
+// (DS18B20 em decimos de °C) a saida PWM do heater (40003) e forcada a 0.
+constexpr uint16_t HEATER_MAX_TEMP_TENTHS = 800;  // 80,0 °C
 
 // RS485 MAX485: RO = D5 (RX), DI = D6 (TX), DE/RE = D4 para nao conflitar com PWM em D3.
 constexpr uint8_t PIN_RS485_RX = D5;       // GPIO14
@@ -356,6 +360,7 @@ uint16_t hregs[HREG_COUNT] = {0, 0, 0};
 
 bool appliedCoils[COILS_COUNT] = {false, false};
 uint16_t appliedHregs[HREG_COUNT] = {0, 0, 0};
+uint16_t appliedHeaterPwm = 0;  // ultimo valor aplicado no pino do heater (ja com protecao termica)
 bool outputsInitialized = false;
 
 unsigned long stateStartedAt = 0;
@@ -1220,6 +1225,16 @@ void updateDiscreteInputs() {
   }
 }
 
+// PWM efetivo da resistencia de aquecimento considerando a protecao termica:
+// acima de 80,0 °C (iregs[1] em decimos) a saida e forcada a 0. Abaixo disso,
+// vale o valor comandado pelo protocolo (hregs[2]).
+uint16_t effectiveHeaterPwm() {
+  if (iregs[1] > HEATER_MAX_TEMP_TENTHS) {
+    return 0;
+  }
+  return hregs[2];
+}
+
 void applyOutputs() {
   digitalWrite(PIN_COIL_0, coils[0] ? HIGH : LOW);
   if (!SERIAL_DEBUG_ENABLED) {
@@ -1228,7 +1243,7 @@ void applyOutputs() {
 
   analogWrite(PIN_PWM_AZIMUTH, hregs[0]);
   analogWrite(PIN_PWM_ELEVATION, hregs[1]);
-  analogWrite(PIN_PWM_HEATER, hregs[2]);
+  analogWrite(PIN_PWM_HEATER, effectiveHeaterPwm());
 }
 
 // Aplica saidas apenas quando houve mudanca, evitando reescrever pinos
@@ -1251,6 +1266,12 @@ void applyOutputsIfChanged() {
       }
     }
   }
+  // Protecao termica: reaplica a saida quando o PWM efetivo do heater muda
+  // (ex.: a temperatura cruzou 80 °C e o pino precisa ser forcado a 0 mesmo
+  // sem mudanca no registrador 40003).
+  if (!changed && effectiveHeaterPwm() != appliedHeaterPwm) {
+    changed = true;
+  }
   if (!changed) {
     return;
   }
@@ -1263,6 +1284,7 @@ void applyOutputsIfChanged() {
   for (uint8_t i = 0; i < HREG_COUNT; i++) {
     appliedHregs[i] = hregs[i];
   }
+  appliedHeaterPwm = effectiveHeaterPwm();
   outputsInitialized = true;
 }
 

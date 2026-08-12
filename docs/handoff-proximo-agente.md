@@ -213,6 +213,7 @@ Conclusão:
 - `40002`: `D3 / GPIO0`
 - `40003`: `D1 / GPIO5` (dedicado à resistência de aquecimento)
 - Frequência do PWM: **50 Hz** (`analogWriteFreq(PWM_FREQ_HZ)` com `PWM_FREQ_HZ = 50`), range 0..1023
+- **Proteção térmica do heater (40003):** acima de 80 °C (`HEATER_MAX_TEMP_TENTHS = 800`, DS18B20 em décimos) a saída PWM da resistência é forçada a 0 via `effectiveHeaterPwm()`; `applyOutputsIfChanged()` reaplica quando a temperatura cruza o limite. Abaixo de 80 °C, vale o valor comandado (`hregs[2]`).
 
 ### RS485 MAX485
 

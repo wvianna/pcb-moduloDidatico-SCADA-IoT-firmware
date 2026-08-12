@@ -253,7 +253,7 @@ constexpr uint8_t PIN_PWM_HEATER = D1;     // GPIO5 (dedicado a resistencia de a
 
 // Frequencia do PWM das saidas PWM (azimute, elevacao e resistencia).
 // Padrao do ESP8266 e 1000 Hz; 50 Hz e adequado para motores/resistencia.
-constexpr uint32_t PWM_FREQ_HZ = 50;
+constexpr uint32_t PWM_FREQ_HZ = 250;
 
 // Protecao termica da resistencia de aquecimento: acima desta temperatura
 // (DS18B20 em decimos de °C) a saida PWM do heater (40003) e forcada a 0.

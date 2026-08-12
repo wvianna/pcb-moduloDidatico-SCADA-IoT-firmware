@@ -212,6 +212,7 @@ Conclusão:
 - `40001`: `D7 / GPIO13`
 - `40002`: `D3 / GPIO0`
 - `40003`: `D1 / GPIO5` (dedicado à resistência de aquecimento)
+- Frequência do PWM: **100 Hz** (`analogWriteFreq(PWM_FREQ_HZ)` com `PWM_FREQ_HZ = 100`), range 0..1023
 
 ### RS485 MAX485
 

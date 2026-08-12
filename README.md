@@ -199,6 +199,8 @@ O mesmo mapeamento de I/O vale para todos os protocolos (Modbus, MQTT e OPC UA).
 | Holding Register | 40002 | 1 | PWM elevação | D3 / GPIO0 | 0..1023 |
 | Holding Register | 40003 | 2 | PWM resistência de aquecimento | D1 / GPIO5 | 0..1023 |
 
+> As saídas PWM operam em **100 Hz** (`analogWriteFreq(100)`), com duty cycle de 0 a 1023 (0 a 100 %).
+
 ### RS485 com MAX485
 
 | Sinal MAX485 | Pino NodeMCU | GPIO |

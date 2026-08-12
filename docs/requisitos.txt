@@ -96,7 +96,7 @@ Regras:
 
 - Manter pinagem atual documentada em `docs/mapeamentopinosmb.txt`.
 - Manter RS485 em D5/D6 com direcao em D4.
-- Manter gatilho de setup em D8/GPIO15 nivel baixo no boot (entrada discreta ED1, dual use com setup AP).
+- Manter gatilho de setup em RX/GPIO3 nivel baixo no boot (entrada discreta ED2, dual use com setup AP; disponivel com SERIAL_DEBUG_ENABLED=false).
 
 8. Entregaveis Minimos
 

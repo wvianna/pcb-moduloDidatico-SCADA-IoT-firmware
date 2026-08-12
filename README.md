@@ -4,7 +4,7 @@ Este firmware transforma um NodeMCU v2 (ESP8266) em um dispositivo de automaçã
 
 Saídas discretas - 2 que podem ser usadas para acionamento de uma ponte H interna ou Buzzer ou Rele.
 
-Entradas digitais - 2 tipo contato seco externo ou switch onboard da PCB. A ED1 é usada para o nodemcu entrar no modo de setup duranta a inicialização.
+Entradas digitais - 2 tipo contato seco externo ou switch onboard da PCB. A ED2 é usada para o nodemcu entrar no modo de setup duranta a inicialização.
 
 Entrada analógica - 1 entrada anlógica com sinal de um potenciômetro onboard.
 
@@ -122,7 +122,7 @@ Saídas discretas PWM - 3 usadas para movimento azimutal e elevação de servo m
 
 ```mermaid
 flowchart TD
-  A[Boot do NodeMCU] --> B{D8/GPIO15 em nível baixo?}
+  A[Boot do NodeMCU] --> B{RX/GPIO3 em nível baixo?}
   B -->|Sim| C[Modo AP]
   B -->|Não| D[Conectar ao Wi-Fi configurado]
   C --> E[Servidor web de setup]
@@ -185,8 +185,8 @@ O mesmo mapeamento de I/O vale para todos os protocolos (Modbus, MQTT e OPC UA).
 
 | Tipo | Base 1 | Base 0 | Função | Pino | GPIO |
 | --- | ---: | ---: | --- | --- | --- |
-| Discrete Input | 10001 | 0 | Entrada discreta 1 | D8 | GPIO15 (também gatilho de setup AP) |
-| Discrete Input | 10002 | 1 | Entrada discreta 2 | RX | GPIO3 |
+| Discrete Input | 10001 | 0 | Entrada discreta 1 | D8 | GPIO15 |
+| Discrete Input | 10002 | 1 | Entrada discreta 2 | RX | GPIO3 (também gatilho de setup AP) |
 
 ### Input registers
 
@@ -247,18 +247,18 @@ Antes de usar qualquer protocolo, configure o dispositivo uma única vez via mod
 
 ### Entrando no modo AP
 
-O firmware entra em setup se `D8 / GPIO15` (entrada discreta ED1) estiver em nível baixo durante o boot.
+O firmware entra em setup se `RX / GPIO3` (entrada discreta ED2) estiver em nível baixo durante o boot.
 
 Procedimento:
 
-1. Coloque `D8 / GPIO15` em nível baixo (switch onboard da PCB para GND).
+1. Coloque `RX / GPIO3` em nível baixo (switch onboard da PCB para GND).
 2. Ligue ou resete a placa.
 3. Solte o pino após o boot.
 4. Procure a rede Wi-Fi `NodeMCU_Setup_<ChipID>`.
 5. Conecte-se à rede.
 6. Acesse `192.168.4.1` no navegador.
 
-> **Atenção (hardware):** `GPIO15` é pino de bootstrap do ESP8266 — deve permanecer em nível **baixo** no instante do reset para o boot normal por flash. Na NodeMCU padrão o `GPIO15` tem pull-down (fica sempre baixo), então com este firmware o dispositivo **sempre entrará em AP**. Para o gatilho funcionar como modo opcional, a PCB precisa manter `GPIO15` baixo no reset (boot ok) e elevá-lo após o boot (pull-up), de modo que o switch para GND force o nível baixo apenas quando pressionado.
+> **Notas:** `GPIO3` é o `RX` da UART nativa — esse gatilho **só está disponível quando o debug serial está desativado** (`SERIAL_DEBUG_ENABLED=false`, padrão). Diferente do `GPIO15`, ele **não é pino de bootstrap**: com `INPUT_PULLUP` o pino fica em nível alto por padrão, então o modo AP só é forçado quando o switch puxa para GND (0 V). Não afeta o modo de boot da placa.
 
 ### Página web de configuração
 
@@ -573,7 +573,7 @@ Solução:
 
 Verifique:
 
-- se `D8 / GPIO15` foi realmente mantido em nível baixo durante o boot
+- se `RX / GPIO3` foi realmente mantido em nível baixo durante o boot
 - se a placa reiniciou corretamente
 
 ### A saída não acionou
@@ -604,7 +604,7 @@ sequenceDiagram
   participant R as Roteador
   participant S as SCADA
 
-  U->>N: Boot com D8/GPIO15 baixo
+  U->>N: Boot com RX/GPIO3 baixo
   N->>U: AP NodeMCU_Setup_<ChipID>
   U->>N: Acessa 192.168.4.1
   U->>N: Salva SSID, senha, IP e Modbus

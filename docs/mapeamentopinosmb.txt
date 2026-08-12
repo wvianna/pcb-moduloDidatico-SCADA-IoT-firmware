@@ -1,8 +1,8 @@
 Tipo de Dado Modbus,Função / Recurso do Projeto,Pino NodeMCU,GPIO,Endereço Modbus (Base 1),Endereço no Código (Base 0),Descrição / Faixa de Valores
 Coil (0x01 / 0x05),Saída Discreta 1,D0,GPIO16,00001,0,Controle de Relé / Atuador (0 ou 1)
 ,Saída Discreta 2,TX,GPIO1,00002,1,Controle de Relé / Atuador (0 ou 1) [1]
-Discrete Input (0x02),Entrada Discreta 1,D8,GPIO15,10001,0,Status de Sensor/Botão (0 ou 1); também gatilho de setup AP (nível baixo no boot)
-,Entrada Discreta 2,RX,GPIO3,10002,1,Status de Sensor/Botão (0 ou 1) [1]
+Discrete Input (0x02),Entrada Discreta 1,D8,GPIO15,10001,0,Status de Sensor/Botão (0 ou 1)
+,Entrada Discreta 2,RX,GPIO3,10002,1,Status de Sensor/Botão (0 ou 1); também gatilho de setup AP (nível baixo no boot) [1]
 Input Register (0x04),Entrada Analógica,A0,ADC0,30001,0,Leitura do ADC nativo (0 a 1023)
 ,Sensor DS18B20,D2,GPIO4,30002,1,"Temperatura (Multiplicado por 10, ex: 255 = 25.5°C)"
 Holding Register (0x03 / 0x06),PWM Azimute,D7,GPIO13,40001,0,Pulso/Ângulo do Motor (0 a 1023)
@@ -14,8 +14,9 @@ Uso Exclusivo / Hardware,MAX485 - RO,D5,GPIO14,———,———,Uso exclusivo
 
 Notas de interoperabilidade:
 - O mesmo mapeamento de I/O acima e utilizado como modelo canonico para os tres modos de operacao do firmware: Modbus, MQTT e OPC UA.
-- O pino D8/GPIO15 (ED1) acumula duas funcoes: entrada discreta 10001 em runtime e gatilho de setup AP no boot (nivel baixo no boot entra em AP).
-- Aviso: GPIO15 e pino de bootstrap do ESP8266. Na NodeMCU padrao ele fica sempre em nivel baixo (pull-down) e forcaria o modo AP sempre. Para o gatilho ser opcional, a PCB deve manter GPIO15 baixo no instante do reset e elevar apos o boot (pull-up), com switch para GND.
+- O pino RX/GPIO3 (ED2) acumula duas funcoes: entrada discreta 10002 em runtime e gatilho de setup AP no boot (nivel baixo no boot entra em AP).
+- RX/GPIO3 nao e pino de bootstrap; com INPUT_PULLUP, o nivel baixo (switch para GND) forca o AP apenas quando acionado. Disponivel apenas com SERIAL_DEBUG_ENABLED=false (RX livre).
+- GPIO15/D8 (ED1) volta a ser somente entrada discreta 10001. GPIO15 continua sendo pino de bootstrap: deve permanecer em nivel baixo no reset para boot normal por flash.
 - Modo Modbus: coils/discrete/input/holding registers sao acessados por Modbus TCP/RTU.
 - Modo MQTT: discrete_inputs e input_registers sao publicados em JSON; coils e holding_registers sao recebidos por subscriber JSON.
 - Modo OPC UA: as configuracoes de endpoint estao disponiveis na interface web de setup; runtime OPC UA permanece reservado para evolucao em plataforma com suporte nativo completo.

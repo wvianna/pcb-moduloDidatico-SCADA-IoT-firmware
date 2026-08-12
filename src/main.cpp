@@ -173,9 +173,9 @@ namespace {
 // Note 160: O monitor serial em 115200 e padrao comum para ESP8266.
 // Note 161: Com SERIAL_DEBUG_ENABLED=false, logs continuam no codigo mas sem uso de TX/RX reservado.
 // Note 162: Essa chave de compilacao permite alternar facilmente entre debug e IO extra.
-// Note 163: O pino de AP trigger e D8/GPIO15, compartilhado com a entrada discreta ED1 (10001).
+// Note 163: O pino de AP trigger e RX/GPIO3, compartilhado com a entrada discreta ED2 (10002).
 // Note 164: O trigger e amostrado apenas no boot; em runtime o pino volta a funcionar como entrada discreta.
-// Note 165: GPIO15 e pino de bootstrap do ESP8266: deve ficar em nivel baixo no reset para boot normal por flash.
+// Note 165: GPIO3 nao e pino de bootstrap; com INPUT_PULLUP, o gatilho ativo em baixo funciona como modo opcional.
 // Note 166: Regras de segurança eletrica devem ser seguidas ao acionar cargas reais.
 // Note 167: GPIOs nao devem alimentar cargas acima da corrente suportada pelo microcontrolador.
 // Note 168: Use transistor, MOSFET ou modulo relay para cargas indutivas.
@@ -243,9 +243,9 @@ constexpr uint8_t PIN_CONFIG_LED = LED_BUILTIN; // GPIO2 / D4 (ativo em LOW)
 
 constexpr uint8_t PIN_COIL_0 = D0;         // GPIO16
 constexpr uint8_t PIN_COIL_1 = 1;          // TX / GPIO1
-constexpr uint8_t PIN_AP_TRIGGER = D8;     // GPIO15 (ED1, amostrado so no boot, ativo em nivel baixo -> AP)
-constexpr uint8_t PIN_INPUT_0 = D8;        // GPIO15 (entrada discreta 10001; tambem gatilho de setup no boot)
-constexpr uint8_t PIN_INPUT_1 = 3;         // RX / GPIO3 (entrada discreta 10002)
+constexpr uint8_t PIN_AP_TRIGGER = 3;      // RX / GPIO3 (ED2, amostrado so no boot, ativo em nivel baixo -> AP)
+constexpr uint8_t PIN_INPUT_0 = D8;        // GPIO15 (entrada discreta 10001)
+constexpr uint8_t PIN_INPUT_1 = 3;         // RX / GPIO3 (entrada discreta 10002; tambem gatilho de setup no boot)
 constexpr uint8_t PIN_DS18B20 = D2;        // GPIO4
 constexpr uint8_t PIN_PWM_AZIMUTH = D7;    // GPIO13
 constexpr uint8_t PIN_PWM_ELEVATION = D3;  // GPIO0
@@ -1242,8 +1242,8 @@ String htmlPage(const String &status, const String &message = "") {
   html += "<table><tr><th>Funcao</th><th>Rotulo</th><th>GPIO</th><th>Descricao</th></tr>";
   html += "<tr><td>Coil 00001</td><td>D0</td><td>GPIO16</td><td>Saida binaria 0</td></tr>";
   html += "<tr><td>Coil 00002</td><td>TX</td><td>GPIO1</td><td>Saida binaria 1 (desativado se debug serial ativo)</td></tr>";
-  html += "<tr><td>Entrada 10001</td><td>D8</td><td>GPIO15</td><td>Entrada binaria 0 (tambem gatilho de setup no boot, ativo em nivel baixo)</td></tr>";
-  html += "<tr><td>Entrada 10002</td><td>RX</td><td>GPIO3</td><td>Entrada binaria 1 (desativado se debug serial ativo)</td></tr>";
+  html += "<tr><td>Entrada 10001</td><td>D8</td><td>GPIO15</td><td>Entrada binaria 0</td></tr>";
+  html += "<tr><td>Entrada 10002</td><td>RX</td><td>GPIO3</td><td>Entrada binaria 1 (tambem gatilho de setup no boot, ativo em nivel baixo; desativado se debug serial ativo)</td></tr>";
   html += "<tr><td>ADC</td><td>A0</td><td>ADC</td><td>Entrada analogica (30001)</td></tr>";
   html += "<tr><td>DS18B20</td><td>D2</td><td>GPIO4</td><td>Temperatura (30002, valor x10)</td></tr>";
   html += "<tr><td>PWM Azimute</td><td>D7</td><td>GPIO13</td><td>Holding register 40001 (0-1023)</td></tr>";
@@ -1746,7 +1746,8 @@ void setupPins() {
 }
 
 bool shouldForceApByBootPin() {
-  // GPIO15 e pino de bootstrap: em NodeMCU padrao fica baixo (pull-down) e forcaria AP sempre.
+  // RX/GPIO3 nao e bootstrap; com INPUT_PULLUP, nivel baixo no boot (switch para GND) forca AP.
+  // Requer SERIAL_DEBUG_ENABLED=false (RX livre); se debug serial ativo, o pino pertence a UART.
   pinMode(PIN_AP_TRIGGER, INPUT_PULLUP);
   delay(2);
   return digitalRead(PIN_AP_TRIGGER) == LOW;

@@ -2,7 +2,7 @@
 
 Este firmware transforma um NodeMCU v2 (ESP8266) em um dispositivo de automação industrial didático, capaz de se comunicar via **Modbus TCP**, **Modbus RTU***, **MQTT** ou **OPC UA** — com o protocolo escolhido pelo usuário na interface web de configuração. Ele possui o seguintes I/Os físicos:
 
-Saídas discretas - 2 que podem ser usadas para acionamento de uma ponte H interna ou Buzzer ou Rele.
+Saídas discretas - 2 que podem ser usadas para acionamento de uma ponte H interna ou Buzzer ou Rele. A habilitação de cada saída é feita via jumper físico na PCB.
 
 Entradas digitais - 2 tipo contato seco externo ou switch onboard da PCB. A ED2 é usada para o nodemcu entrar no modo de setup duranta a inicialização.
 
